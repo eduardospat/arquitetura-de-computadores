@@ -1,0 +1,23 @@
+{
+  "elements": [
+    {
+      "type": "image",
+      "src": "templates/completo_mono_datapath_controle.jpg",
+      "x": 100,
+      "y": 60,
+      "width": 850,
+      "height": 600
+    },
+    {
+      "type": "text",
+      "text": "MIPS Monociclo: Datapath & Controle",
+      "x": 100,
+      "y": 20,
+      "color": "#2563eb",
+      "size": 3
+    }
+  ],
+  "zoom": 1.0,
+  "panX": 0,
+  "panY": 0
+}
