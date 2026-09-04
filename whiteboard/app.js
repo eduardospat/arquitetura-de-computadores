@@ -305,7 +305,6 @@ const btnOpenGallery = document.getElementById('btnOpenGallery');
 const galleryModal = document.getElementById('galleryModal');
 const btnCloseGallery = document.getElementById('btnCloseGallery');
 const galleryGrid = document.getElementById('galleryGrid');
-const chkReplaceCanvas = document.getElementById('chkReplaceCanvas');
 
 const btnSaveAI = document.getElementById('btnSaveAI');
 const btnExportPNG = document.getElementById('btnExportPNG');
@@ -730,8 +729,7 @@ function buildGalleryModal(catalog) {
     `;
 
     card.addEventListener('click', () => {
-      const replace = chkReplaceCanvas.checked;
-      loadTemplateToCanvas(`templates/${t.filename}`, replace);
+      loadTemplateToCanvas(`templates/${t.filename}`);
       closeGalleryModal();
     });
 
@@ -777,21 +775,16 @@ async function loadTemplateOptions() {
   }
 }
 
-function loadTemplateToCanvas(url, replaceCanvas = true) {
+// ALWAYS adds the diagram to the board WITHOUT removing existing items
+function loadTemplateToCanvas(url) {
   const img = new Image();
   img.crossOrigin = 'Anonymous';
   img.onload = () => {
-    if (replaceCanvas) {
-      recordState();
-      elements = [];
-      selectedElement = null;
-    } else {
-      recordState();
-    }
+    recordState(); // Save state for undo
 
     // Determine comfortable size for screen
-    let maxW = Math.max(500, width * 0.85);
-    let maxH = Math.max(400, height * 0.85);
+    let maxW = Math.max(600, width * 0.85);
+    let maxH = Math.max(450, height * 0.85);
     let w = img.width;
     let h = img.height;
 
@@ -799,10 +792,25 @@ function loadTemplateToCanvas(url, replaceCanvas = true) {
     w = Math.round(w * scale);
     h = Math.round(h * scale);
 
-    // Center in canvas coordinate space
-    const center = screenToCanvas(width / 2, height / 2);
-    const posX = center.x - w / 2;
-    const posY = center.y - h / 2;
+    let posX, posY;
+
+    if (elements.length === 0) {
+      // If canvas is empty, place right in the center
+      const center = screenToCanvas(width / 2, height / 2);
+      posX = Math.round(center.x - w / 2);
+      posY = Math.round(center.y - h / 2);
+    } else {
+      // If canvas already has items, place to the right of existing elements
+      const bounds = getElementsBounds();
+      if (bounds) {
+        posX = Math.round(bounds.maxX + 80); // 80px gap to the right
+        posY = Math.round(bounds.minY);       // Align with top of existing elements
+      } else {
+        const center = screenToCanvas(width / 2, height / 2);
+        posX = Math.round(center.x - w / 2);
+        posY = Math.round(center.y - h / 2);
+      }
+    }
 
     const el = {
       type: 'image',
@@ -817,10 +825,11 @@ function loadTemplateToCanvas(url, replaceCanvas = true) {
     elements.push(el);
     selectedElement = el;
 
-    // Reset pan/zoom and fit nicely
+    // Center and fit all elements on screen so user sees both previous work and the new diagram!
     fitToScreen();
     scheduleAutoSave();
-    showSyncBadge('Diagrama inserido! Pronto para desenhar.', 'synced');
+    showToast('➕ Novo diagrama adicionado ao quadro! O conteúdo anterior foi preservado.');
+    showSyncBadge('Novo diagrama adicionado!', 'synced');
   };
   img.src = url;
 }
@@ -828,7 +837,7 @@ function loadTemplateToCanvas(url, replaceCanvas = true) {
 window.loadTemplateByName = function(fname) {
   studySidebar.classList.add('closed');
   sidebarBackdrop.classList.remove('active');
-  loadTemplateToCanvas(`templates/${fname}`, true);
+  loadTemplateToCanvas(`templates/${fname}`);
 };
 
 // ==================== Mouse & Touch Event Listeners ====================
@@ -900,7 +909,7 @@ function setupEventListeners() {
   templateSelect.addEventListener('change', () => {
     const val = templateSelect.value;
     if (val) {
-      loadTemplateToCanvas(val, true);
+      loadTemplateToCanvas(val);
       templateSelect.value = ''; // reset select so it can be re-triggered anytime
     }
   });

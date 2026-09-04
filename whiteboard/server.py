@@ -373,6 +373,13 @@ class WhiteboardHandler(http.server.SimpleHTTPRequestHandler):
                 with open(current_png, 'wb') as f:
                     f.write(img_bytes)
 
+                root_png = os.path.join(REPO_DIR, 'current_board.png')
+                try:
+                    with open(root_png, 'wb') as f:
+                        f.write(img_bytes)
+                except Exception:
+                    pass
+
                 # Save snapshot
                 snapshot_png = os.path.join(SNAPSHOTS_DIR, f'snapshot_{timestamp_str}.png')
                 with open(snapshot_png, 'wb') as f:
@@ -382,6 +389,13 @@ class WhiteboardHandler(http.server.SimpleHTTPRequestHandler):
             current_json = os.path.join(BASE_DIR, 'current_board.json')
             with open(current_json, 'w', encoding='utf-8') as f:
                 json.dump(state_data, f, indent=2, ensure_ascii=False)
+
+            root_json = os.path.join(REPO_DIR, 'current_board.json')
+            try:
+                with open(root_json, 'w', encoding='utf-8') as f:
+                    json.dump(state_data, f, indent=2, ensure_ascii=False)
+            except Exception:
+                pass
 
             self.send_response(200)
             self.send_header('Content-Type', 'application/json; charset=utf-8')

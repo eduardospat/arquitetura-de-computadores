@@ -2,14 +2,14 @@
   "elements": [
     {
       "type": "image",
-      "src": "templates/completo_multi_excecoes.jpg",
-      "x": 1760.7070672581635,
-      "y": 75.11768313459606,
-      "width": 838,
-      "height": 600
+      "src": "templates/incompleto_multi_apenas_registradores.jpg",
+      "x": 1345.6404005914967,
+      "y": 795.7306510707937,
+      "width": 938,
+      "height": 395
     }
   ],
-  "zoom": 1.01,
-  "panX": -1487.0041379307454,
-  "panY": -25.868859965942022
+  "zoom": 0.1725,
+  "panX": 212.01553089796698,
+  "panY": 23.9907050151173
 }
