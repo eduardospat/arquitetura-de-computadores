@@ -4,4 +4,6 @@ __pycache__/
 whiteboard/snapshots/*.png
 !whiteboard/snapshots/.gitkeep
 snapshots/*.png
+*.exe
+cloudflared.exe
 

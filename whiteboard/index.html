@@ -43,6 +43,10 @@
           <span class="badge-dot"></span>
           <span id="syncText">Pronto</span>
         </div>
+        <button id="btnCollaborate" class="btn btn-secondary" title="Sessão Colaborativa (convidar amigos para desenhar juntos)">
+          👥 <span class="btn-text">Colaborar</span>
+          <span id="collabBadge" class="collab-badge connected" title="Participantes na sessão">1</span>
+        </button>
         <button id="btnUndo" class="btn btn-secondary" title="Desfazer ação anterior (Ctrl + Z)" disabled>
           ↩️ <span class="btn-text">Desfazer</span>
         </button>
@@ -361,6 +365,100 @@
 
       <div class="modal-body" id="galleryGrid">
         <!-- Filled dynamically by JavaScript -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Real-time Collaboration Modal -->
+  <div id="collabModal" class="modal-overlay">
+    <div class="modal-card collab-modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h2>👥 Sessão Colaborativa em Tempo Real</h2>
+          <p>Convide amigos para desenhar, estudar circuitos e resolver exercícios no mesmo quadro</p>
+        </div>
+        <button id="btnCloseCollab" class="close-btn" title="Fechar">&times;</button>
+      </div>
+
+      <div class="collab-modal-body">
+        <!-- Section 1: Local Wi-Fi (Super simple) -->
+        <div class="collab-card highlight">
+          <div class="collab-card-header">
+            <span class="collab-card-icon">📡</span>
+            <div>
+              <div class="collab-card-title">Mesmo Wi-Fi / Rede Local (Mais Fácil)</div>
+              <div class="collab-card-subtitle">Qualquer amigo conectado ao mesmo Wi-Fi entra direto pelo navegador</div>
+            </div>
+          </div>
+          <div class="collab-url-box">
+            <input type="text" id="collabLocalUrl" readonly value="Carregando link local..." />
+            <button id="btnCopyLocalUrl" class="btn btn-primary" title="Copiar link para a área de transferência">
+              📋 <span class="btn-text">Copiar Link</span>
+            </button>
+          </div>
+          <p class="collab-tip">
+            💡 <b>Zero complicação:</b> Seu amigo só precisa colar esse link no Chrome, Edge ou navegador do tablet/celular. Não precisa instalar nada nem criar conta!
+          </p>
+        </div>
+
+        <!-- Section 2: Online / Tunnels (Friends outside local Wi-Fi) -->
+        <div class="collab-card">
+          <div class="collab-card-header">
+            <span class="collab-card-icon">🌐</span>
+            <div>
+              <div class="collab-card-title">Pela Internet (Amigos fora da sua casa)</div>
+              <div class="collab-card-subtitle">Para quem está em outra rede ou em outra cidade</div>
+            </div>
+          </div>
+          <p class="collab-desc">
+            Basta rodar um comando gratuito no seu terminal para gerar um link público sem cadastro:
+          </p>
+          <div class="collab-cmd-box">
+            <code>npx localtunnel --port 8080</code>
+            <button id="btnCopyTunnelCmd" class="btn btn-secondary btn-sm" title="Copiar comando">Copiar</button>
+          </div>
+          <div class="collab-cmd-box" style="margin-top:6px;">
+            <code>.\cloudflared.exe tunnel --edge-ip-version 4 --protocol http2 --url http://localhost:8080</code>
+            <button id="btnCopyCloudflareCmd" class="btn btn-secondary btn-sm" title="Copiar comando">Copiar</button>
+          </div>
+          <p class="collab-tip">
+            💡 Ou dê dois cliques no arquivo <b>iniciar_tunel.bat</b> na pasta do projeto! Copie a URL pública gerada (ex: <i>https://xxxx.trycloudflare.com</i>) e envie para seus amigos.
+          </p>
+        </div>
+
+        <!-- Section 3: Profile & Cursor Customization -->
+        <div class="collab-card">
+          <div class="collab-card-header">
+            <span class="collab-card-icon">👤</span>
+            <div>
+              <div class="collab-card-title">Seu Perfil no Quadro</div>
+              <div class="collab-card-subtitle">Como seus amigos verão seu cursor e nome</div>
+            </div>
+          </div>
+          <div class="collab-profile-row">
+            <div class="collab-input-group">
+              <label for="collabUsernameInput">Seu Nome / Apelido:</label>
+              <input type="text" id="collabUsernameInput" placeholder="Ex: Eduardo" maxlength="20" />
+            </div>
+            <div class="collab-input-group">
+              <label>Cor do seu Ponteiro:</label>
+              <div class="collab-color-picker" id="collabColorPicker">
+                <div class="collab-color-dot active" data-cursor-color="#2563eb" style="background:#2563eb;" title="Azul"></div>
+                <div class="collab-color-dot" data-cursor-color="#10b981" style="background:#10b981;" title="Verde"></div>
+                <div class="collab-color-dot" data-cursor-color="#8b5cf6" style="background:#8b5cf6;" title="Roxo"></div>
+                <div class="collab-color-dot" data-cursor-color="#ef4444" style="background:#ef4444;" title="Vermelho"></div>
+                <div class="collab-color-dot" data-cursor-color="#f59e0b" style="background:#f59e0b;" title="Laranja"></div>
+                <div class="collab-color-dot" data-cursor-color="#06b6d4" style="background:#06b6d4;" title="Ciano"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 4: Live Status -->
+        <div class="collab-status-bar">
+          <span class="collab-status-indicator" id="collabStatusIndicator">🟢</span>
+          <span id="collabStatusText">Conectado ao servidor colaborativo · 1 participante</span>
+        </div>
       </div>
     </div>
   </div>

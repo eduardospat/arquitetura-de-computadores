@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
 Whiteboard Local Server for Arquitetura de Computadores
-Provides static file serving and API endpoints for saving canvas state,
-exporting PNG for AI inspection, and loading templates/feedback.
+Provides real-time multi-user collaboration (WebSockets), static file serving,
+and API endpoints for saving canvas state, exporting PNG for AI inspection,
+and loading templates/feedback.
 """
 
-import http.server
-import socketserver
 import os
 import sys
 
@@ -16,6 +15,9 @@ if hasattr(sys.stdout, 'reconfigure'):
 import json
 import base64
 import time
+import socket
+import asyncio
+import uuid
 import webbrowser
 from datetime import datetime
 
@@ -291,40 +293,119 @@ TEMPLATES_CATALOG = [
     }
 ]
 
-class WhiteboardHandler(http.server.SimpleHTTPRequestHandler):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=BASE_DIR, **kwargs)
+def get_local_ip():
+    """Detects real local LAN IP of the current machine (e.g. 192.168.x.x)."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.1)
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return '127.0.0.1'
 
-    def end_headers(self):
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-        self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
-        super().end_headers()
+# In-memory canonical state of board elements
+current_board_elements = []
+connected_clients = {}  # clientId -> { "ws": WebSocket, "name": str, "color": str }
+ACTUAL_PORT = PORT
 
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self.end_headers()
+def load_initial_elements():
+    """Load existing vector elements from current_board.json if present."""
+    global current_board_elements
+    json_path = os.path.join(BASE_DIR, 'current_board.json')
+    if os.path.exists(json_path):
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, dict) and 'elements' in data:
+                    current_board_elements = data['elements']
+                elif isinstance(data, list):
+                    current_board_elements = data
+        except Exception as e:
+            print(f"Aviso ao carregar current_board.json inicial: {e}")
 
-    def do_GET(self):
-        if self.path == '/api/templates':
-            self.handle_get_templates()
-        elif self.path == '/api/status':
-            self.handle_get_status()
-        elif self.path == '/api/ai-feedback':
-            self.handle_get_ai_feedback()
-        else:
-            super().do_GET()
+load_initial_elements()
 
-    def do_POST(self):
-        if self.path == '/api/save':
-            self.handle_save_board()
-        elif self.path == '/api/ai-feedback':
-            self.handle_post_ai_feedback()
-        else:
-            self.send_error(404, 'Endpoint não encontrado')
+def save_elements_to_disk():
+    """Save vector elements to current_board.json (does NOT create image prints)."""
+    try:
+        current_json = os.path.join(BASE_DIR, 'current_board.json')
+        with open(current_json, 'w', encoding='utf-8') as f:
+            json.dump({'elements': current_board_elements}, f, indent=2, ensure_ascii=False)
 
-    def handle_get_templates(self):
+        root_json = os.path.join(REPO_DIR, 'current_board.json')
+        try:
+            with open(root_json, 'w', encoding='utf-8') as f:
+                json.dump({'elements': current_board_elements}, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"Erro ao persistir current_board.json: {e}")
+
+save_task = None
+def schedule_save_elements():
+    global save_task
+    try:
+        loop = asyncio.get_running_loop()
+        if save_task and not save_task.done():
+            save_task.cancel()
+
+        async def _delayed_save():
+            await asyncio.sleep(1.0)
+            save_elements_to_disk()
+
+        save_task = loop.create_task(_delayed_save())
+    except Exception:
+        save_elements_to_disk()
+
+async def broadcast(message: dict, exclude: str = None):
+    text = json.dumps(message, ensure_ascii=False)
+    to_remove = []
+    for cid, client in list(connected_clients.items()):
+        if exclude and cid == exclude:
+            continue
+        try:
+            await client["ws"].send_text(text)
+        except Exception:
+            to_remove.append(cid)
+    for cid in to_remove:
+        if cid in connected_clients:
+            del connected_clients[cid]
+
+# ==================== FastAPI App Setup ====================
+try:
+    from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.responses import FileResponse
+    from fastapi.middleware.cors import CORSMiddleware
+    import uvicorn
+
+    app = FastAPI(title="Whiteboard MIPS - Colaborativo")
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @app.get("/api/network-info")
+    async def api_network_info():
+        ip = get_local_ip()
+        return {
+            "local_ip": ip,
+            "port": ACTUAL_PORT,
+            "local_url": f"http://{ip}:{ACTUAL_PORT}",
+            "clients_count": len(connected_clients)
+        }
+
+    @app.get("/api/templates")
+    async def api_templates():
         templates = []
         for item in TEMPLATES_CATALOG:
             fpath = os.path.join(TEMPLATES_DIR, item['filename'])
@@ -337,80 +418,61 @@ class WhiteboardHandler(http.server.SimpleHTTPRequestHandler):
                     'badge': item.get('badge', ''),
                     'desc': item.get('desc', '')
                 })
+        return templates
 
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.end_headers()
-        self.wfile.write(json.dumps(templates, ensure_ascii=False).encode('utf-8'))
-
-    def handle_get_status(self):
+    @app.get("/api/status")
+    async def api_status():
         board_png = os.path.join(BASE_DIR, 'current_board.png')
         feedback_file = os.path.join(BASE_DIR, 'ai_feedback.json')
-        
+
         has_board = os.path.exists(board_png)
         mtime = os.path.getmtime(board_png) if has_board else 0
-        
+
         has_feedback = os.path.exists(feedback_file)
         feedback_mtime = os.path.getmtime(feedback_file) if has_feedback else 0
 
-        status = {
+        return {
             'has_board': has_board,
             'board_last_modified': datetime.fromtimestamp(mtime).isoformat() if has_board else None,
             'has_feedback': has_feedback,
             'feedback_last_modified': datetime.fromtimestamp(feedback_mtime).isoformat() if has_feedback else None
         }
 
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.end_headers()
-        self.wfile.write(json.dumps(status).encode('utf-8'))
-
-    def handle_get_ai_feedback(self):
+    @app.get("/api/ai-feedback")
+    async def api_get_ai_feedback():
         feedback_file = os.path.join(BASE_DIR, 'ai_feedback.json')
-        feedback_data = {"notes": [], "timestamp": None}
         if os.path.exists(feedback_file):
             try:
                 with open(feedback_file, 'r', encoding='utf-8') as f:
-                    feedback_data = json.load(f)
+                    return json.load(f)
             except Exception as e:
-                feedback_data = {"error": str(e), "notes": []}
+                return {"error": str(e), "notes": []}
+        return {"notes": [], "timestamp": None}
 
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.end_headers()
-        self.wfile.write(json.dumps(feedback_data, ensure_ascii=False).encode('utf-8'))
-
-    def handle_post_ai_feedback(self):
-        content_length = int(self.headers.get('Content-Length', 0))
-        post_data = self.rfile.read(content_length)
+    @app.post("/api/ai-feedback")
+    async def api_post_ai_feedback(request: Request):
         feedback_file = os.path.join(BASE_DIR, 'ai_feedback.json')
         try:
-            payload = json.loads(post_data.decode('utf-8'))
+            payload = await request.json()
             with open(feedback_file, 'w', encoding='utf-8') as f:
                 json.dump(payload, f, indent=2, ensure_ascii=False)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(json.dumps({'status': 'ok', 'saved': True}).encode('utf-8'))
+            return {'status': 'ok', 'saved': True}
         except Exception as e:
-            self.send_error(500, f'Erro ao salvar feedback: {e}')
+            raise HTTPException(status_code=500, detail=f'Erro ao salvar feedback: {e}')
 
-    def handle_save_board(self):
-        content_length = int(self.headers.get('Content-Length', 0))
-        post_data = self.rfile.read(content_length)
-        
+    @app.post("/api/save")
+    async def api_save_board(request: Request):
         try:
-            payload = json.loads(post_data.decode('utf-8'))
+            payload = await request.json()
             image_data = payload.get('image', '')
             state_data = payload.get('state', {})
             timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-            # Process Base64 PNG image
+            # Process Base64 PNG image (only when explicitly requested)
             if image_data.startswith('data:image/png;base64,'):
                 b64_str = image_data.split('data:image/png;base64,')[1]
                 img_bytes = base64.b64decode(b64_str)
 
-                # Save current_board.png (for AI view_file)
                 current_png = os.path.join(BASE_DIR, 'current_board.png')
                 with open(current_png, 'wb') as f:
                     f.write(img_bytes)
@@ -423,64 +485,197 @@ class WhiteboardHandler(http.server.SimpleHTTPRequestHandler):
                     pass
 
             # Save current_board.json (vector elements)
-            current_json = os.path.join(BASE_DIR, 'current_board.json')
-            with open(current_json, 'w', encoding='utf-8') as f:
-                json.dump(state_data, f, indent=2, ensure_ascii=False)
-
-            root_json = os.path.join(REPO_DIR, 'current_board.json')
-            try:
-                with open(root_json, 'w', encoding='utf-8') as f:
+            if state_data:
+                current_json = os.path.join(BASE_DIR, 'current_board.json')
+                with open(current_json, 'w', encoding='utf-8') as f:
                     json.dump(state_data, f, indent=2, ensure_ascii=False)
-            except Exception:
-                pass
 
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json; charset=utf-8')
-            self.end_headers()
-            response = {
+                root_json = os.path.join(REPO_DIR, 'current_board.json')
+                try:
+                    with open(root_json, 'w', encoding='utf-8') as f:
+                        json.dump(state_data, f, indent=2, ensure_ascii=False)
+                except Exception:
+                    pass
+
+                new_elements = state_data.get('elements')
+                if new_elements is not None:
+                    current_board_elements.clear()
+                    current_board_elements.extend(new_elements)
+
+            return {
                 'status': 'ok',
                 'timestamp': timestamp_str,
                 'message': 'Quadro salvo com sucesso! O assistente de IA já consegue visualizar o desenho.',
                 'image_path': 'whiteboard/current_board.png'
             }
-            self.wfile.write(json.dumps(response, ensure_ascii=False).encode('utf-8'))
         except Exception as e:
-            self.send_error(500, f'Erro ao salvar quadro: {e}')
+            raise HTTPException(status_code=500, detail=f'Erro ao salvar quadro: {e}')
+
+    @app.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket):
+        await websocket.accept()
+        client_id = str(uuid.uuid4())[:8]
+        connected_clients[client_id] = {
+            "ws": websocket,
+            "name": "Amigo",
+            "color": "#2563eb"
+        }
+
+        try:
+            # 1. Send initial board state & client ID
+            await websocket.send_text(json.dumps({
+                "type": "init",
+                "clientId": client_id,
+                "elements": current_board_elements,
+                "userCount": len(connected_clients)
+            }, ensure_ascii=False))
+
+            # 2. Notify all others about presence
+            await broadcast({
+                "type": "presence",
+                "userCount": len(connected_clients),
+                "joined": client_id
+            }, exclude=client_id)
+
+            # 3. Message loop
+            while True:
+                data_text = await websocket.receive_text()
+                try:
+                    msg = json.loads(data_text)
+                except Exception:
+                    continue
+
+                msg_type = msg.get("type")
+
+                if msg_type == "join":
+                    connected_clients[client_id]["name"] = msg.get("name", "Amigo")
+                    connected_clients[client_id]["color"] = msg.get("color", "#2563eb")
+                    await broadcast({
+                        "type": "presence",
+                        "userCount": len(connected_clients),
+                        "user": {
+                            "clientId": client_id,
+                            "name": connected_clients[client_id]["name"],
+                            "color": connected_clients[client_id]["color"]
+                        }
+                    })
+
+                elif msg_type == "cursor":
+                    msg["clientId"] = client_id
+                    await broadcast(msg, exclude=client_id)
+
+                elif msg_type == "stroke_live":
+                    msg["clientId"] = client_id
+                    await broadcast(msg, exclude=client_id)
+
+                elif msg_type == "element_add":
+                    el = msg.get("element")
+                    if el:
+                        current_board_elements.append(el)
+                        schedule_save_elements()
+                    msg["clientId"] = client_id
+                    await broadcast(msg, exclude=client_id)
+
+                elif msg_type == "board_sync":
+                    elements = msg.get("elements")
+                    if elements is not None:
+                        current_board_elements.clear()
+                        current_board_elements.extend(elements)
+                        schedule_save_elements()
+                    msg["clientId"] = client_id
+                    await broadcast(msg, exclude=client_id)
+
+                elif msg_type == "board_clear":
+                    current_board_elements.clear()
+                    schedule_save_elements()
+                    msg["clientId"] = client_id
+                    await broadcast(msg, exclude=client_id)
+
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            pass
+        finally:
+            if client_id in connected_clients:
+                del connected_clients[client_id]
+            await broadcast({
+                "type": "presence",
+                "userCount": len(connected_clients),
+                "left": client_id
+            })
+            await broadcast({
+                "type": "cursor_remove",
+                "clientId": client_id
+            })
+
+    # Serve index.html with no-cache headers for instant updates
+    @app.get("/")
+    async def get_index():
+        return FileResponse(
+            os.path.join(BASE_DIR, "index.html"),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+
+    # Mount static files (style.css, app.js, templates, etc.)
+    app.mount("/", StaticFiles(directory=BASE_DIR), name="static")
+
+    HAS_FASTAPI = True
+
+except ImportError:
+    HAS_FASTAPI = False
+
 
 def run_server(port=PORT, open_browser=True):
+    global ACTUAL_PORT
     actual_port = port
-    server = None
+
+    # Check port availability
     for p in range(port, port + 10):
-        try:
-            server = socketserver.TCPServer(("", p), WhiteboardHandler)
-            actual_port = p
-            break
-        except OSError:
-            continue
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("", p))
+                actual_port = p
+                break
+            except OSError:
+                continue
 
-    if not server:
-        print(f"Erro: Não foi possível vincular a nenhuma porta a partir de {port}")
-        sys.exit(1)
+    ACTUAL_PORT = actual_port
+    local_ip = get_local_ip()
 
-    url = f"http://localhost:{actual_port}"
-    print("=" * 65)
-    print(" 🚀 QUADRO BRANCO - ARQUITETURA DE COMPUTADORES")
-    print(f" 📡 Servidor rodando em: {url}")
-    print(f" 📂 Arquivo sincronizado com a IA: {os.path.join(BASE_DIR, 'current_board.png')}")
-    print("=" * 65)
-    print(" Dica: Desenhe, cole imagens (Ctrl+V) ou carregue templates.")
-    print(" Clique em '💾 Salvar para IA' para atualizar a visão do assistente.")
+    url_local = f"http://localhost:{actual_port}"
+    url_wifi = f"http://{local_ip}:{actual_port}"
+
+    print("=" * 68)
+    print(" 🚀 QUADRO BRANCO MIPS - SESSÃO COLABORATIVA EM TEMPO REAL")
+    print(f" 📡 No seu computador:        {url_local}")
+    print(f" 👥 Para amigos no mesmo Wi-Fi: {url_wifi}")
+    print("-" * 68)
+    print(" 🌐 Para amigos fora de casa (pela Internet):")
+    print(f"    Rode no terminal: npx localtunnel --port {actual_port}")
+    print(f"    ou:               cloudflared tunnel --url http://localhost:{actual_port}")
+    print("=" * 68)
+    print(" Dica: Desenhe, cole prints (Ctrl+V) ou carregue diagramas da matéria.")
+    print(" Todos os desenhos e ponteiros dos amigos sincronizam em tempo real!")
     print(" Pressione Ctrl+C no terminal para encerrar.")
-    print("=" * 65)
+    print("=" * 68)
 
     if open_browser:
-        webbrowser.open(url)
+        webbrowser.open(url_local)
 
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nEncerrando servidor...")
-        server.shutdown()
+    if HAS_FASTAPI:
+        import uvicorn
+        uvicorn.run(app, host="0.0.0.0", port=actual_port, log_level="warning")
+    else:
+        # Fallback to standard library http.server
+        import http.server
+        import socketserver
+
+        class FallbackHandler(http.server.SimpleHTTPRequestHandler):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, directory=BASE_DIR, **kwargs)
+
+        with socketserver.TCPServer(("", actual_port), FallbackHandler) as httpd:
+            httpd.serve_forever()
 
 if __name__ == '__main__':
     open_b = '--no-browser' not in sys.argv

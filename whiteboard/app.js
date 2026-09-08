@@ -48,6 +48,19 @@ let dragOffsetY = 0;
 // Auto-save debounce timer
 let autoSaveTimer = null;
 
+// ==================== WebSocket Collaboration State ====================
+let ws = null;
+let wsClientId = null;
+let wsConnected = false;
+let wsReconnectTimer = null;
+let myUserName = localStorage.getItem('whiteboard_username') || ('Amigo ' + Math.floor(100 + Math.random() * 900));
+let myUserColor = localStorage.getItem('whiteboard_usercolor') || '#2563eb';
+const peerCursors = new Map(); // clientId -> { x, y, name, color, tool, lastSeen }
+const peerLiveStrokes = new Map(); // clientId -> { type, points, color, size, tool }
+let lastCursorBroadcastTime = 0;
+let lastStrokeBroadcastTime = 0;
+let hasSentInitialSync = false;
+
 // Static Curated Templates Catalog (Fallback guarantee!)
 const STATIC_TEMPLATES = [
   // 0. Prova Real Oficial (UFSM)
@@ -380,6 +393,20 @@ const btnCloseSidebar = document.getElementById('btnCloseSidebar');
 const sidebarBackdrop = document.getElementById('sidebarBackdrop');
 const canvasHint = document.getElementById('canvasHint');
 
+// Collaboration DOM Elements
+const btnCollaborate = document.getElementById('btnCollaborate');
+const collabModal = document.getElementById('collabModal');
+const btnCloseCollab = document.getElementById('btnCloseCollab');
+const collabBadge = document.getElementById('collabBadge');
+const collabLocalUrl = document.getElementById('collabLocalUrl');
+const btnCopyLocalUrl = document.getElementById('btnCopyLocalUrl');
+const btnCopyTunnelCmd = document.getElementById('btnCopyTunnelCmd');
+const btnCopyCloudflareCmd = document.getElementById('btnCopyCloudflareCmd');
+const collabUsernameInput = document.getElementById('collabUsernameInput');
+const collabColorPicker = document.getElementById('collabColorPicker');
+const collabStatusText = document.getElementById('collabStatusText');
+const collabStatusIndicator = document.getElementById('collabStatusIndicator');
+
 // Initialize
 window.addEventListener('load', () => {
   resizeCanvas();
@@ -390,6 +417,8 @@ window.addEventListener('load', () => {
   setupEventListeners();
   setupHotkeys();
   updateUndoRedoUI();
+  setupCollabUI();
+  initWebSocket();
 
   // Watch for container resizes dynamically
   if (window.ResizeObserver) {
@@ -502,6 +531,7 @@ function undo() {
   restoreBoardState(prevState);
   updateUndoRedoUI();
   scheduleAutoSave();
+  broadcastBoardSync();
   showSyncBadge('Ação desfeita (Undo)', 'saving');
 }
 
@@ -515,6 +545,7 @@ function redo() {
   restoreBoardState(nextState);
   updateUndoRedoUI();
   scheduleAutoSave();
+  broadcastBoardSync();
   showSyncBadge('Ação refeita (Redo)', 'saving');
 }
 
@@ -562,10 +593,23 @@ function render() {
     drawElement(ctx, currentPath);
   }
 
+  // Render peer live strokes in progress
+  peerLiveStrokes.forEach(stroke => {
+    drawElement(ctx, stroke);
+  });
+
   // Draw selection outline
   if (selectedElement) {
     drawSelectionBox(ctx, selectedElement);
   }
+
+  // Draw peer cursors
+  const now = Date.now();
+  peerCursors.forEach((peer) => {
+    if (now - peer.lastSeen < 15000) {
+      drawPeerCursor(ctx, peer);
+    }
+  });
 
   ctx.restore();
   updateZoomIndicator();
@@ -958,6 +1002,7 @@ function loadTemplateToCanvas(url) {
     // Center and fit all elements on screen so user sees both previous work and the new diagram!
     fitToScreen();
     scheduleAutoSave();
+    broadcastBoardSync();
     showToast('➕ Novo diagrama adicionado ao quadro! O conteúdo anterior foi preservado.');
     showSyncBadge('Novo diagrama adicionado!', 'synced');
   };
@@ -1041,6 +1086,7 @@ function setupEventListeners() {
       selectedElement = null;
       render();
       scheduleAutoSave();
+      broadcastBoardClear();
     }
   });
 
@@ -1280,6 +1326,10 @@ function handlePointerMove(e) {
 
   const pt = screenToCanvas(mouseX, mouseY);
 
+  if (isInside || isDrawing || isDraggingElement) {
+    broadcastCursor(pt.x, pt.y);
+  }
+
   if (isDraggingElement && selectedElement) {
     if (selectedElement.x !== undefined) {
       selectedElement.x = pt.x - dragOffsetX;
@@ -1316,6 +1366,7 @@ function handlePointerMove(e) {
   if (currentPath) {
     if (currentPath.type === 'path') {
       currentPath.points.push({ x: pt.x, y: pt.y });
+      broadcastLiveStroke(currentPath);
     } else {
       currentPath.x2 = pt.x;
       currentPath.y2 = pt.y;
@@ -1341,6 +1392,7 @@ function handlePointerUp() {
       if (Math.abs(curX - dragOriginalPos.x) > 1 || Math.abs(curY - dragOriginalPos.y) > 1) {
         pushUndoState(dragStartState);
         scheduleAutoSave();
+        broadcastBoardSync();
       }
     }
     dragStartState = null;
@@ -1355,6 +1407,7 @@ function handlePointerUp() {
         pushUndoState(eraseStartState);
         eraseStartState = null;
         scheduleAutoSave();
+        broadcastBoardSync();
       }
     }
     return;
@@ -1383,10 +1436,12 @@ function handlePointerUp() {
           pushUndoState(drawStartState);
           drawStartState = null;
         }
-        elements.push(currentPath);
+        const createdEl = currentPath;
+        elements.push(createdEl);
         currentPath = null;
         render();
         scheduleAutoSave();
+        broadcastElementAdd(createdEl);
       } else {
         // Discard zero-length element without affecting undo/redo stacks
         currentPath = null;
@@ -1773,16 +1828,18 @@ function promptAddText(screenX, screenY, canvasX, canvasY) {
     const text = input.value.trim();
     if (text) {
       recordState();
-      elements.push({
+      const textEl = {
         type: 'text',
         text: text,
         x: canvasX,
         y: canvasY,
         color: currentColor,
         size: currentSize
-      });
+      };
+      elements.push(textEl);
       render();
       scheduleAutoSave();
+      broadcastElementAdd(textEl);
     }
     if (input.parentNode) {
       input.remove();
@@ -1849,6 +1906,14 @@ function addImageFromFile(file, posX, posY) {
       selectedElement = el;
       render();
       scheduleAutoSave();
+      broadcastElementAdd({
+        type: 'image',
+        src: event.target.result,
+        x: x,
+        y: y,
+        width: w,
+        height: h
+      });
     };
     img.src = event.target.result;
   };
@@ -2088,6 +2153,7 @@ function setupHotkeys() {
         selectedElement = null;
         render();
         scheduleAutoSave();
+        broadcastBoardSync();
         return;
       }
     }
@@ -2132,3 +2198,433 @@ function setupHotkeys() {
     }
   });
 }
+
+// ==================== WebSocket Collaboration System ====================
+
+function initWebSocket() {
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${location.host}/ws`;
+
+  try {
+    ws = new WebSocket(wsUrl);
+  } catch (err) {
+    console.warn('Erro ao inicializar WebSocket:', err);
+    updateCollabUI(1, false);
+    scheduleWsReconnect();
+    return;
+  }
+
+  ws.onopen = () => {
+    wsConnected = true;
+    updateCollabUI(1, true);
+    // Send user profile on connect
+    sendWsMessage({
+      type: 'join',
+      name: myUserName,
+      color: myUserColor
+    });
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      handleWsMessage(msg);
+    } catch (err) {
+      console.error('Erro ao processar mensagem colaborativa:', err);
+    }
+  };
+
+  ws.onclose = () => {
+    wsConnected = false;
+    updateCollabUI(1, false);
+    peerCursors.clear();
+    peerLiveStrokes.clear();
+    render();
+    scheduleWsReconnect();
+  };
+
+  ws.onerror = () => {
+    // onclose handles reconnect
+  };
+}
+
+function scheduleWsReconnect() {
+  if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+  wsReconnectTimer = setTimeout(() => {
+    initWebSocket();
+  }, 3000);
+}
+
+function sendWsMessage(msg) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify(msg));
+    } catch (e) {
+      console.warn('Falha ao enviar mensagem WS:', e);
+    }
+  }
+}
+
+function handleWsMessage(msg) {
+  if (!msg || !msg.type) return;
+
+  switch (msg.type) {
+    case 'init': {
+      wsClientId = msg.clientId;
+      const count = msg.userCount || 1;
+      updateCollabUI(count, true);
+
+      // If server already has elements, adopt them!
+      if (msg.elements && msg.elements.length > 0) {
+        elements = msg.elements;
+        rehydrateImages();
+        render();
+      } else if (!hasSentInitialSync && elements.length > 0) {
+        // If server is blank but we have existing elements from localStorage, share with server!
+        hasSentInitialSync = true;
+        broadcastBoardSync();
+      }
+      break;
+    }
+
+    case 'presence': {
+      const count = msg.userCount || 1;
+      updateCollabUI(count, true);
+      if (msg.user && msg.user.name && msg.user.clientId !== wsClientId) {
+        showToast(`👋 ${msg.user.name} entrou no quadro!`);
+      }
+      if (msg.left) {
+        peerCursors.delete(msg.left);
+        peerLiveStrokes.delete(msg.left);
+        render();
+      }
+      break;
+    }
+
+    case 'cursor': {
+      if (msg.clientId === wsClientId) return;
+      peerCursors.set(msg.clientId, {
+        x: msg.x,
+        y: msg.y,
+        name: msg.name || 'Amigo',
+        color: msg.color || '#2563eb',
+        tool: msg.tool || 'pen',
+        lastSeen: Date.now()
+      });
+      render();
+      break;
+    }
+
+    case 'cursor_remove': {
+      peerCursors.delete(msg.clientId);
+      peerLiveStrokes.delete(msg.clientId);
+      render();
+      break;
+    }
+
+    case 'stroke_live': {
+      if (msg.clientId === wsClientId) return;
+      peerLiveStrokes.set(msg.clientId, {
+        type: 'path',
+        tool: msg.tool || 'pen',
+        color: msg.color || '#2563eb',
+        size: msg.size || 2,
+        points: msg.points || []
+      });
+      render();
+      break;
+    }
+
+    case 'element_add': {
+      if (msg.clientId === wsClientId) return;
+      peerLiveStrokes.delete(msg.clientId);
+      if (msg.element) {
+        elements.push(msg.element);
+        if (msg.element.type === 'image') {
+          rehydrateImages();
+        }
+        render();
+      }
+      break;
+    }
+
+    case 'board_sync': {
+      if (msg.clientId === wsClientId) return;
+      peerLiveStrokes.delete(msg.clientId);
+      if (Array.isArray(msg.elements)) {
+        elements = msg.elements;
+        selectedElement = null;
+        rehydrateImages();
+        render();
+      }
+      break;
+    }
+
+    case 'board_clear': {
+      if (msg.clientId === wsClientId) return;
+      peerLiveStrokes.clear();
+      elements = [];
+      selectedElement = null;
+      render();
+      showToast('🧹 O quadro foi limpo por outro participante.');
+      break;
+    }
+  }
+}
+
+// Broadcast throttle helpers
+function broadcastCursor(x, y) {
+  const now = Date.now();
+  if (now - lastCursorBroadcastTime > 35) {
+    lastCursorBroadcastTime = now;
+    sendWsMessage({
+      type: 'cursor',
+      x: Math.round(x * 10) / 10,
+      y: Math.round(y * 10) / 10,
+      name: myUserName,
+      color: myUserColor,
+      tool: currentTool
+    });
+  }
+}
+
+function broadcastLiveStroke(pathEl) {
+  const now = Date.now();
+  if (now - lastStrokeBroadcastTime > 45) {
+    lastStrokeBroadcastTime = now;
+    sendWsMessage({
+      type: 'stroke_live',
+      tool: pathEl.tool || 'pen',
+      color: pathEl.color,
+      size: pathEl.size,
+      points: pathEl.points
+    });
+  }
+}
+
+function broadcastElementAdd(el) {
+  if (!el) return;
+  const clean = { ...el };
+  delete clean.imgObj;
+  sendWsMessage({
+    type: 'element_add',
+    element: clean
+  });
+}
+
+function broadcastBoardSync() {
+  const cleanElements = elements.map(el => {
+    const copy = { ...el };
+    delete copy.imgObj;
+    return copy;
+  });
+  sendWsMessage({
+    type: 'board_sync',
+    elements: cleanElements
+  });
+}
+
+function broadcastBoardClear() {
+  sendWsMessage({
+    type: 'board_clear'
+  });
+}
+
+// Draw peer cursor on canvas
+function drawPeerCursor(context, peer) {
+  context.save();
+  context.translate(peer.x, peer.y);
+
+  // Scale inversely by zoom so cursor and label size stay constant in screen pixels
+  const invZoom = 1 / zoom;
+  context.scale(invZoom, invZoom);
+
+  const color = peer.color || '#2563eb';
+
+  // 1. Draw pointer arrow
+  context.beginPath();
+  context.moveTo(0, 0);
+  context.lineTo(0, 16);
+  context.lineTo(4, 12);
+  context.lineTo(8, 20);
+  context.lineTo(11, 18.5);
+  context.lineTo(7, 10.5);
+  context.lineTo(12, 10.5);
+  context.closePath();
+  context.fillStyle = color;
+  context.fill();
+  context.strokeStyle = '#ffffff';
+  context.lineWidth = 1.5;
+  context.stroke();
+
+  // 2. Draw name badge
+  const name = peer.name || 'Amigo';
+  context.font = '600 11px Inter, sans-serif';
+  const textWidth = context.measureText(name).width;
+  const tagX = 14;
+  const tagY = 12;
+  const tagW = Math.max(28, textWidth + 12);
+  const tagH = 20;
+
+  context.fillStyle = color;
+  context.beginPath();
+  if (context.roundRect) {
+    context.roundRect(tagX, tagY, tagW, tagH, 5);
+  } else {
+    context.rect(tagX, tagY, tagW, tagH);
+  }
+  context.fill();
+  context.strokeStyle = '#ffffff';
+  context.lineWidth = 1;
+  context.stroke();
+
+  // 3. Draw text label
+  context.fillStyle = '#ffffff';
+  context.textAlign = 'left';
+  context.textBaseline = 'middle';
+  context.fillText(name, tagX + 6, tagY + tagH / 2);
+
+  context.restore();
+}
+
+function updateCollabUI(count, isConnected) {
+  if (collabBadge) {
+    collabBadge.textContent = count;
+    if (isConnected) {
+      collabBadge.className = 'collab-badge connected';
+      collabBadge.title = `${count} pessoa${count > 1 ? 's' : ''} na sessão colaborativa`;
+    } else {
+      collabBadge.className = 'collab-badge offline';
+      collabBadge.title = 'Desconectado do servidor colaborativo';
+    }
+  }
+
+  if (collabStatusText && collabStatusIndicator) {
+    if (isConnected) {
+      collabStatusIndicator.textContent = '🟢';
+      collabStatusText.textContent = `Conectado em tempo real · ${count} participante${count > 1 ? 's' : ''} no quadro`;
+    } else {
+      collabStatusIndicator.textContent = '🔴';
+      collabStatusText.textContent = 'Servidor desconectado (tentando reconectar...)';
+    }
+  }
+}
+
+// Setup Collaboration Modal Events & Info
+function setupCollabUI() {
+  if (!btnCollaborate || !collabModal) return;
+
+  btnCollaborate.addEventListener('click', openCollabModal);
+  if (btnCloseCollab) btnCloseCollab.addEventListener('click', closeCollabModal);
+
+  collabModal.addEventListener('click', (e) => {
+    if (e.target === collabModal) closeCollabModal();
+  });
+
+  // Profile: username input
+  if (collabUsernameInput) {
+    collabUsernameInput.value = myUserName;
+    collabUsernameInput.addEventListener('input', () => {
+      const val = collabUsernameInput.value.trim();
+      if (val) {
+        myUserName = val;
+        localStorage.setItem('whiteboard_username', myUserName);
+        sendWsMessage({
+          type: 'join',
+          name: myUserName,
+          color: myUserColor
+        });
+      }
+    });
+  }
+
+  // Profile: color picker
+  if (collabColorPicker) {
+    const dots = collabColorPicker.querySelectorAll('.collab-color-dot');
+    dots.forEach(d => {
+      if (d.dataset.cursorColor === myUserColor) {
+        d.classList.add('active');
+      } else {
+        d.classList.remove('active');
+      }
+
+      d.addEventListener('click', () => {
+        dots.forEach(dot => dot.classList.remove('active'));
+        d.classList.add('active');
+        myUserColor = d.dataset.cursorColor;
+        localStorage.setItem('whiteboard_usercolor', myUserColor);
+        sendWsMessage({
+          type: 'join',
+          name: myUserName,
+          color: myUserColor
+        });
+      });
+    });
+  }
+
+  // Copy Buttons
+  if (btnCopyLocalUrl && collabLocalUrl) {
+    btnCopyLocalUrl.addEventListener('click', () => {
+      navigator.clipboard.writeText(collabLocalUrl.value).then(() => {
+        const origText = btnCopyLocalUrl.innerHTML;
+        btnCopyLocalUrl.innerHTML = '✅ Copiado!';
+        setTimeout(() => { btnCopyLocalUrl.innerHTML = origText; }, 2500);
+      }).catch(() => {
+        collabLocalUrl.select();
+        document.execCommand('copy');
+        btnCopyLocalUrl.innerHTML = '✅ Copiado!';
+      });
+    });
+  }
+
+  if (btnCopyTunnelCmd) {
+    btnCopyTunnelCmd.addEventListener('click', () => {
+      navigator.clipboard.writeText('npx localtunnel --port 8080').then(() => {
+        btnCopyTunnelCmd.textContent = 'Copiado!';
+        setTimeout(() => { btnCopyTunnelCmd.textContent = 'Copiar'; }, 2500);
+      });
+    });
+  }
+
+  if (btnCopyCloudflareCmd) {
+    btnCopyCloudflareCmd.addEventListener('click', () => {
+      navigator.clipboard.writeText('.\\cloudflared.exe tunnel --edge-ip-version 4 --protocol http2 --url http://localhost:8080').then(() => {
+        btnCopyCloudflareCmd.textContent = 'Copiado!';
+        setTimeout(() => { btnCopyCloudflareCmd.textContent = 'Copiar'; }, 2500);
+      });
+    });
+  }
+}
+
+async function openCollabModal() {
+  if (!collabModal) return;
+  collabModal.classList.add('open');
+
+  // Fetch local LAN network info from server
+  try {
+    const res = await fetch('/api/network-info');
+    if (res.ok) {
+      const info = await res.json();
+      if (collabLocalUrl && info.local_url) {
+        collabLocalUrl.value = info.local_url;
+      }
+      if (info.clients_count !== undefined) {
+        updateCollabUI(info.clients_count, wsConnected);
+      }
+    }
+  } catch (err) {
+    // Fallback to location.host
+    if (collabLocalUrl) {
+      collabLocalUrl.value = `http://${location.hostname}:${location.port || 8080}`;
+    }
+  }
+}
+
+function closeCollabModal() {
+  if (collabModal) collabModal.classList.remove('open');
+}
+
