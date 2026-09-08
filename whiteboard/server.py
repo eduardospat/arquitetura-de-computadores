@@ -30,6 +30,50 @@ os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
 # Curated catalog of all course diagrams
 TEMPLATES_CATALOG = [
+    # 0. Prova Real Oficial (UFSM)
+    {
+        "filename": "prova_q1_add3.jpg",
+        "title": "🏆 Prova Q1: add3 $rd, $rs, $rt (Monociclo)",
+        "category": "🏆 Prova Real (UFSM)",
+        "badge": "Prova",
+        "desc": "Questão 1 da prova real (3.0 pts). Adicionar instrução rd = rs + rt + rd modificando o banco de registradores e inserindo 2ª ULA."
+    },
+    {
+        "filename": "prova_q2_subabs.jpg",
+        "title": "🏆 Prova Q2: subabs $rd, $rs, $rt (Monociclo)",
+        "category": "🏆 Prova Real (UFSM)",
+        "badge": "Prova",
+        "desc": "Questão 2 da prova real (3.0 pts). Adicionar instrução rd = |rs - rt|. Cuidado com a seleção pelo bit de sinal!"
+    },
+    {
+        "filename": "prova_q3_relu.jpg",
+        "title": "🏆 Prova Q3: relu $rs (Multiciclo + FSM)",
+        "category": "🏆 Prova Real (UFSM)",
+        "badge": "Prova",
+        "desc": "Questão 3 da prova real (4.0 pts). Instrução if (rs > 0) rs = rs else rs = 0 no multiciclo com novos estados na FSM."
+    },
+    {
+        "filename": "prova1_pag_1.jpg",
+        "title": "🏆 Prova Completa - Página 1 (Q1 add3)",
+        "category": "🏆 Prova Real (UFSM)",
+        "badge": "Prova",
+        "desc": "Enunciado e datapath original da Questão 1 da prova."
+    },
+    {
+        "filename": "prova1_pag_2.jpg",
+        "title": "🏆 Prova Completa - Página 2 (Q2 subabs)",
+        "category": "🏆 Prova Real (UFSM)",
+        "badge": "Prova",
+        "desc": "Enunciado e datapath original da Questão 2 da prova."
+    },
+    {
+        "filename": "prova1_pag_3.jpg",
+        "title": "🏆 Prova Completa - Página 3 (Q3 relu)",
+        "category": "🏆 Prova Real (UFSM)",
+        "badge": "Prova",
+        "desc": "Enunciado e diagrama multiciclo original da Questão 3 da prova."
+    },
+
     # 1. Incompletos para Praticar / Preencher
     {
         "filename": "incompleto_mono_sem_controle.jpg",

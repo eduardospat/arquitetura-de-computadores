@@ -29,6 +29,7 @@
 
         <select id="templateSelect" title="Selecione um diagrama para carregar imediatamente">
           <option value="">-- Carregamento Rápido --</option>
+          <optgroup label="🏆 Prova Real Oficial (UFSM)" id="optgroup-exam"></optgroup>
           <optgroup label="✏️ Incompletos (Para Você Preencher / Treinar)" id="optgroup-incomplete"></optgroup>
           <optgroup label="📖 Completos (Referência & Estudo)" id="optgroup-complete"></optgroup>
           <optgroup label="⚡ Os 5 Passos do Multiciclo" id="optgroup-steps"></optgroup>
@@ -252,7 +253,24 @@
 
           <!-- Tab 3: Exercícios -->
           <div class="tab-pane" id="tab-exercicios">
-            <h4>Questões Chave da Prova 1</h4>
+            <h4>🏆 Questões da Prova Real (UFSM)</h4>
+            <div class="exercise-card" onclick="loadTemplateByName('prova_q1_add3.jpg')">
+              <span class="ex-badge" style="background:#eab308; color:#0f172a; font-weight:700;">PROVA Q1</span>
+              <b>Q1: add3 $rd, $rs, $rt (3.0 pts)</b>
+              <p>rd = rs + rt + rd (Monociclo). 3ª porta de leitura e 2ª ULA/somador.</p>
+            </div>
+            <div class="exercise-card" onclick="loadTemplateByName('prova_q2_subabs.jpg')">
+              <span class="ex-badge" style="background:#eab308; color:#0f172a; font-weight:700;">PROVA Q2</span>
+              <b>Q2: subabs $rd, $rs, $rt (3.0 pts)</b>
+              <p>rd = |rs - rt| (Monociclo). Bloco módulo condicional ao bit de sinal 31.</p>
+            </div>
+            <div class="exercise-card" onclick="loadTemplateByName('prova_q3_relu.jpg')">
+              <span class="ex-badge" style="background:#eab308; color:#0f172a; font-weight:700;">PROVA Q3</span>
+              <b>Q3: relu $rs (4.0 pts)</b>
+              <p>if (rs > 0) rs = rs else rs = 0 (Multiciclo). Novos estados e expansão de RegDst.</p>
+            </div>
+
+            <h4>Exercícios Recomendados dos Slides</h4>
             <div class="exercise-card" onclick="loadTemplateByName('exercicio_4_1_and.jpg')">
               <span class="ex-badge">Mono</span>
               <b>4.1 Sinais e Recursos (AND)</b>
@@ -323,10 +341,12 @@
       <div class="modal-toolbar">
         <div class="gallery-filter-buttons">
           <button class="filter-btn active" data-category="all">Todos</button>
+          <button class="filter-btn" data-category="🏆 Prova Real (UFSM)">🏆 Prova Real (UFSM)</button>
           <button class="filter-btn" data-category="Incompletos (Para Praticar)">✏️ Em Branco (Para Completar)</button>
           <button class="filter-btn" data-category="Completos (Referência)">📖 Completos (Referência)</button>
           <button class="filter-btn" data-category="Passos Multiciclo">⚡ 5 Passos Multiciclo</button>
           <button class="filter-btn" data-category="Exercícios dos Slides">🎯 Exercícios dos Slides</button>
+        </div>
         <div class="gallery-info-badge" style="font-size:11px; color:#93c5fd; background:rgba(59,130,246,0.15); padding:5px 10px; border-radius:6px; border:1px solid rgba(59,130,246,0.3);">
           ➕ Adiciona ao quadro sem apagar nada
         </div>

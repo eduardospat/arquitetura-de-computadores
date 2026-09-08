@@ -46,6 +46,56 @@ let autoSaveTimer = null;
 
 // Static Curated Templates Catalog (Fallback guarantee!)
 const STATIC_TEMPLATES = [
+  // 0. Prova Real Oficial (UFSM)
+  {
+    filename: "prova_q1_add3.jpg",
+    title: "🏆 Prova Q1: add3 $rd, $rs, $rt (Monociclo)",
+    category: "🏆 Prova Real (UFSM)",
+    badge: "prova",
+    badgeText: "PROVA",
+    desc: "Questão 1 da prova real (3.0 pts). Adicionar instrução rd = rs + rt + rd modificando o banco de registradores e inserindo 2ª ULA."
+  },
+  {
+    filename: "prova_q2_subabs.jpg",
+    title: "🏆 Prova Q2: subabs $rd, $rs, $rt (Monociclo)",
+    category: "🏆 Prova Real (UFSM)",
+    badge: "prova",
+    badgeText: "PROVA",
+    desc: "Questão 2 da prova real (3.0 pts). Adicionar instrução rd = |rs - rt|. Cuidado com o cálculo de módulo e seleção pelo bit de sinal!"
+  },
+  {
+    filename: "prova_q3_relu.jpg",
+    title: "🏆 Prova Q3: relu $rs (Multiciclo + FSM)",
+    category: "🏆 Prova Real (UFSM)",
+    badge: "prova",
+    badgeText: "PROVA",
+    desc: "Questão 3 da prova real (4.0 pts). Instrução if (rs > 0) rs = rs else rs = 0 no multiciclo com novos estados na FSM."
+  },
+  {
+    filename: "prova1_pag_1.jpg",
+    title: "🏆 Prova Completa - Página 1 (Q1 add3)",
+    category: "🏆 Prova Real (UFSM)",
+    badge: "prova",
+    badgeText: "PROVA",
+    desc: "Enunciado e datapath original da Questão 1 da prova."
+  },
+  {
+    filename: "prova1_pag_2.jpg",
+    title: "🏆 Prova Completa - Página 2 (Q2 subabs)",
+    category: "🏆 Prova Real (UFSM)",
+    badge: "prova",
+    badgeText: "PROVA",
+    desc: "Enunciado e datapath original da Questão 2 da prova."
+  },
+  {
+    filename: "prova1_pag_3.jpg",
+    title: "🏆 Prova Completa - Página 3 (Q3 relu)",
+    category: "🏆 Prova Real (UFSM)",
+    badge: "prova",
+    badgeText: "PROVA",
+    desc: "Enunciado e diagrama multiciclo original da Questão 3 da prova."
+  },
+
   // 1. Incompletos (Para Praticar / Preencher)
   {
     filename: "incompleto_mono_sem_controle.jpg",
@@ -297,6 +347,7 @@ const STATIC_TEMPLATES = [
 
 // DOM Elements
 const templateSelect = document.getElementById('templateSelect');
+const optgroupExam = document.getElementById('optgroup-exam');
 const optgroupIncomplete = document.getElementById('optgroup-incomplete');
 const optgroupComplete = document.getElementById('optgroup-complete');
 const optgroupSteps = document.getElementById('optgroup-steps');
@@ -682,6 +733,7 @@ function fitToScreen() {
 
 // ==================== Dropdown & Gallery Builder ====================
 function populateDropdown(catalog) {
+  if (optgroupExam) optgroupExam.innerHTML = '';
   optgroupIncomplete.innerHTML = '';
   optgroupComplete.innerHTML = '';
   optgroupSteps.innerHTML = '';
@@ -692,7 +744,9 @@ function populateDropdown(catalog) {
     opt.value = `templates/${t.filename}`;
     opt.textContent = t.title;
 
-    if (t.category.includes('Incompletos')) {
+    if (t.category.includes('Prova Real') && optgroupExam) {
+      optgroupExam.appendChild(opt);
+    } else if (t.category.includes('Incompletos')) {
       optgroupIncomplete.appendChild(opt);
     } else if (t.category.includes('Completos')) {
       optgroupComplete.appendChild(opt);

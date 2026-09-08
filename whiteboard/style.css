@@ -973,6 +973,12 @@ canvas {
   border: 1px solid rgba(168, 85, 247, 0.4);
 }
 
+.badge-prova {
+  background: rgba(234, 179, 8, 0.25);
+  color: #fde047;
+  border: 1px solid rgba(234, 179, 8, 0.5);
+}
+
 .card-title {
   font-size: 13px;
   font-weight: 600;
