@@ -43,6 +43,12 @@
           <span class="badge-dot"></span>
           <span id="syncText">Pronto</span>
         </div>
+        <button id="btnUndo" class="btn btn-secondary" title="Desfazer ação anterior (Ctrl + Z)" disabled>
+          ↩️ <span class="btn-text">Desfazer</span>
+        </button>
+        <button id="btnRedo" class="btn btn-secondary" title="Refazer ação desfeita (Ctrl + Y ou Ctrl + Shift + Z)" disabled>
+          ↪️ <span class="btn-text">Refazer</span>
+        </button>
         <button id="btnSaveAI" class="btn btn-primary" title="Salva o quadro atual em alta resolução para que a IA possa analisar">
           💾 <span class="btn-text">Salvar para IA</span>
         </button>
@@ -151,6 +157,7 @@
       <!-- Canvas Area -->
       <main class="canvas-container" id="canvasWrapper">
         <canvas id="whiteboardCanvas"></canvas>
+        <div id="eraserCursor" class="eraser-cursor"></div>
         <div class="canvas-hint" id="canvasHint">
           💡 Dica: Cole qualquer print com <b>Ctrl + V</b>, ou abra a <b>Galeria de Diagramas</b> no topo para carregar e desenhar!
         </div>

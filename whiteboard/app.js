@@ -35,9 +35,13 @@ let startY = 0;
 let elements = []; // { type: 'path'|'line'|'arrow'|'rect'|'mux'|'alu'|'text'|'image', ... }
 let undoStack = [];
 let redoStack = [];
+const MAX_UNDO_STACK = 100;
 let currentPath = null;
+let drawStartState = null;
 let selectedElement = null;
 let isDraggingElement = false;
+let dragStartState = null;
+let dragOriginalPos = null;
 let dragOffsetX = 0;
 let dragOffsetY = 0;
 
@@ -385,6 +389,7 @@ window.addEventListener('load', () => {
   loadSavedBoard();
   setupEventListeners();
   setupHotkeys();
+  updateUndoRedoUI();
 
   // Watch for container resizes dynamically
   if (window.ResizeObserver) {
@@ -430,41 +435,111 @@ function canvasToScreen(cx, cy) {
   };
 }
 
+// Image cache for fast, flicker-free undo/redo
+const imageCache = new Map();
+
+function serializeBoardState() {
+  return JSON.stringify(elements, (key, value) => {
+    if (key === 'imgObj') return undefined;
+    return value;
+  });
+}
+
+function updateUndoRedoUI() {
+  const btnUndo = document.getElementById('btnUndo');
+  const btnRedo = document.getElementById('btnRedo');
+  if (btnUndo) {
+    btnUndo.disabled = undoStack.length === 0;
+    btnUndo.style.opacity = undoStack.length === 0 ? '0.45' : '1';
+    btnUndo.style.cursor = undoStack.length === 0 ? 'not-allowed' : 'pointer';
+  }
+  if (btnRedo) {
+    btnRedo.disabled = redoStack.length === 0;
+    btnRedo.style.opacity = redoStack.length === 0 ? '0.45' : '1';
+    btnRedo.style.cursor = redoStack.length === 0 ? 'not-allowed' : 'pointer';
+  }
+}
+
+// Push state to undo stack (with deduplication)
+function pushUndoState(stateStr) {
+  if (!stateStr) return;
+  // Prevent duplicate consecutive entries
+  if (undoStack.length > 0 && undoStack[undoStack.length - 1] === stateStr) {
+    return;
+  }
+  undoStack.push(stateStr);
+  if (undoStack.length > MAX_UNDO_STACK) undoStack.shift();
+  redoStack = [];
+  updateUndoRedoUI();
+}
+
 // Save state for Undo/Redo
 function recordState() {
-  undoStack.push(JSON.stringify(elements));
-  if (undoStack.length > 50) undoStack.shift();
-  redoStack = [];
+  pushUndoState(serializeBoardState());
   scheduleAutoSave();
+}
+
+function restoreBoardState(stateStr) {
+  if (!stateStr) return;
+  try {
+    elements = JSON.parse(stateStr);
+    selectedElement = null;
+    isDraggingElement = false;
+    rehydrateImages();
+    render();
+  } catch (err) {
+    console.error('Erro ao restaurar estado do quadro:', err);
+  }
 }
 
 function undo() {
   if (undoStack.length === 0) return;
-  redoStack.push(JSON.stringify(elements));
+  const currentState = serializeBoardState();
+  redoStack.push(currentState);
+  if (redoStack.length > MAX_UNDO_STACK) redoStack.shift();
+
   const prevState = undoStack.pop();
-  elements = JSON.parse(prevState);
-  rehydrateImages();
-  render();
+  restoreBoardState(prevState);
+  updateUndoRedoUI();
   scheduleAutoSave();
+  showSyncBadge('Ação desfeita (Undo)', 'saving');
 }
 
 function redo() {
   if (redoStack.length === 0) return;
-  undoStack.push(JSON.stringify(elements));
+  const currentState = serializeBoardState();
+  undoStack.push(currentState);
+  if (undoStack.length > MAX_UNDO_STACK) undoStack.shift();
+
   const nextState = redoStack.pop();
-  elements = JSON.parse(nextState);
-  rehydrateImages();
-  render();
+  restoreBoardState(nextState);
+  updateUndoRedoUI();
   scheduleAutoSave();
+  showSyncBadge('Ação refeita (Redo)', 'saving');
 }
 
 function rehydrateImages() {
   elements.forEach(el => {
-    if (el.type === 'image' && !el.imgObj) {
-      const img = new Image();
-      img.onload = () => render();
-      img.src = el.src;
-      el.imgObj = img;
+    if (el.type === 'image') {
+      if (el.imgObj && el.imgObj.complete) {
+        imageCache.set(el.src, el.imgObj);
+        return;
+      }
+      if (imageCache.has(el.src)) {
+        el.imgObj = imageCache.get(el.src);
+      } else {
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+        img.onload = () => {
+          imageCache.set(el.src, img);
+          render();
+        };
+        img.src = el.src;
+        el.imgObj = img;
+        if (img.complete) {
+          imageCache.set(el.src, img);
+        }
+      }
     }
   });
 }
@@ -729,6 +804,7 @@ function fitToScreen() {
   panY = height / 2 - cy * zoom;
 
   render();
+  updateEraserCursorSize();
 }
 
 // ==================== Dropdown & Gallery Builder ====================
@@ -894,6 +970,22 @@ window.loadTemplateByName = function(fname) {
   loadTemplateToCanvas(`templates/${fname}`);
 };
 
+function setActiveTool(tool) {
+  currentTool = tool;
+  selectedElement = null;
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.querySelector(`.tool-btn[data-tool="${currentTool}"]`);
+  if (btn) btn.classList.add('active');
+
+  if (currentTool === 'eraser') {
+    wrapper.classList.add('eraser-mode');
+    updateEraserCursorSize();
+  } else {
+    hideEraserCursor();
+  }
+  render();
+}
+
 // ==================== Mouse & Touch Event Listeners ====================
 function setupEventListeners() {
   // Canvas pointer events
@@ -901,17 +993,24 @@ function setupEventListeners() {
   window.addEventListener('mousemove', handlePointerMove);
   window.addEventListener('mouseup', handlePointerUp);
 
+  // Wrapper cursor tracking
+  wrapper.addEventListener('mouseleave', () => {
+    hideEraserCursor();
+  });
+  wrapper.addEventListener('mouseenter', (e) => {
+    if (currentTool === 'eraser' && !spacePressed && !isPanning) {
+      const rect = canvas.getBoundingClientRect();
+      updateEraserCursorPos(e.clientX - rect.left, e.clientY - rect.top);
+    }
+  });
+
   // Zoom with Wheel
   canvas.addEventListener('wheel', handleWheel, { passive: false });
 
   // Tool buttons
   document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      currentTool = btn.dataset.tool;
-      selectedElement = null;
-      render();
+      setActiveTool(btn.dataset.tool);
     });
   });
 
@@ -930,6 +1029,7 @@ function setupEventListeners() {
       document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       currentSize = parseInt(btn.dataset.size, 10);
+      updateEraserCursorSize();
     });
   });
 
@@ -940,7 +1040,7 @@ function setupEventListeners() {
       elements = [];
       selectedElement = null;
       render();
-      saveToAI();
+      scheduleAutoSave();
     }
   });
 
@@ -950,6 +1050,12 @@ function setupEventListeners() {
     if (file) addImageFromFile(file);
     fileInput.value = '';
   });
+
+  // Undo & Redo buttons
+  const btnUndo = document.getElementById('btnUndo');
+  const btnRedo = document.getElementById('btnRedo');
+  if (btnUndo) btnUndo.addEventListener('click', undo);
+  if (btnRedo) btnRedo.addEventListener('click', redo);
 
   // Save for AI button
   btnSaveAI.addEventListener('click', () => {
@@ -1073,6 +1179,7 @@ function handlePointerDown(e) {
     startPanX = e.clientX - panX;
     startPanY = e.clientY - panY;
     wrapper.classList.add('panning');
+    hideEraserCursor();
     return;
   }
 
@@ -1088,8 +1195,13 @@ function handlePointerDown(e) {
       if (bbox && pt.x >= bbox.x && pt.x <= bbox.x + bbox.width && pt.y >= bbox.y && pt.y <= bbox.y + bbox.height) {
         selectedElement = el;
         isDraggingElement = true;
-        dragOffsetX = pt.x - el.x;
-        dragOffsetY = pt.y - el.y;
+        dragStartState = serializeBoardState();
+        dragOriginalPos = {
+          x: el.x !== undefined ? el.x : el.x1,
+          y: el.y !== undefined ? el.y : el.y1
+        };
+        dragOffsetX = pt.x - (el.x !== undefined ? el.x : el.x1);
+        dragOffsetY = pt.y - (el.y !== undefined ? el.y : el.y1);
         break;
       }
     }
@@ -1103,14 +1215,21 @@ function handlePointerDown(e) {
   }
 
   if (currentTool === 'eraser') {
-    eraseNear(pt.x, pt.y);
+    eraseStartState = serializeBoardState();
+    eraseModified = false;
+    lastErasePoint = { x: pt.x, y: pt.y };
     isDrawing = true;
+    const radius = getEraserRadius();
+    if (eraseCircleStep(pt.x, pt.y, radius)) {
+      eraseModified = true;
+      render();
+    }
     return;
   }
 
   // Draw tools: pen, highlighter, line, arrow, rect, mux, alu
   isDrawing = true;
-  recordState();
+  drawStartState = serializeBoardState();
 
   if (currentTool === 'pen' || currentTool === 'highlighter') {
     currentPath = {
@@ -1139,6 +1258,7 @@ function handlePointerMove(e) {
   if (isPanning) {
     panX = e.clientX - startPanX;
     panY = e.clientY - startPanY;
+    hideEraserCursor();
     render();
     return;
   }
@@ -1146,11 +1266,32 @@ function handlePointerMove(e) {
   const rect = canvas.getBoundingClientRect();
   const mouseX = e.clientX - rect.left;
   const mouseY = e.clientY - rect.top;
+  const isInside = mouseX >= 0 && mouseX <= rect.width && mouseY >= 0 && mouseY <= rect.height;
+
+  if (currentTool === 'eraser' && !spacePressed) {
+    if (isInside) {
+      updateEraserCursorPos(mouseX, mouseY);
+    } else {
+      hideEraserCursor();
+    }
+  } else {
+    hideEraserCursor();
+  }
+
   const pt = screenToCanvas(mouseX, mouseY);
 
   if (isDraggingElement && selectedElement) {
-    selectedElement.x = pt.x - dragOffsetX;
-    selectedElement.y = pt.y - dragOffsetY;
+    if (selectedElement.x !== undefined) {
+      selectedElement.x = pt.x - dragOffsetX;
+      selectedElement.y = pt.y - dragOffsetY;
+    } else if (selectedElement.x1 !== undefined) {
+      const dx = (pt.x - dragOffsetX) - selectedElement.x1;
+      const dy = (pt.y - dragOffsetY) - selectedElement.y1;
+      selectedElement.x1 += dx;
+      selectedElement.y1 += dy;
+      selectedElement.x2 += dx;
+      selectedElement.y2 += dy;
+    }
     render();
     return;
   }
@@ -1158,7 +1299,17 @@ function handlePointerMove(e) {
   if (!isDrawing) return;
 
   if (currentTool === 'eraser') {
-    eraseNear(pt.x, pt.y);
+    if (lastErasePoint) {
+      eraseAlongSegment(lastErasePoint.x, lastErasePoint.y, pt.x, pt.y);
+      lastErasePoint = { x: pt.x, y: pt.y };
+    } else {
+      lastErasePoint = { x: pt.x, y: pt.y };
+      const radius = getEraserRadius();
+      if (eraseCircleStep(pt.x, pt.y, radius)) {
+        eraseModified = true;
+        render();
+      }
+    }
     return;
   }
 
@@ -1177,20 +1328,71 @@ function handlePointerUp() {
   if (isPanning) {
     isPanning = false;
     wrapper.classList.remove('panning');
+    if (currentTool === 'eraser') {
+      wrapper.classList.add('eraser-mode');
+    }
   }
 
   if (isDraggingElement) {
     isDraggingElement = false;
-    scheduleAutoSave();
+    if (selectedElement && dragOriginalPos && dragStartState) {
+      const curX = selectedElement.x !== undefined ? selectedElement.x : selectedElement.x1;
+      const curY = selectedElement.y !== undefined ? selectedElement.y : selectedElement.y1;
+      if (Math.abs(curX - dragOriginalPos.x) > 1 || Math.abs(curY - dragOriginalPos.y) > 1) {
+        pushUndoState(dragStartState);
+        scheduleAutoSave();
+      }
+    }
+    dragStartState = null;
+    dragOriginalPos = null;
+  }
+
+  if (currentTool === 'eraser') {
+    if (isDrawing) {
+      isDrawing = false;
+      lastErasePoint = null;
+      if (eraseModified && eraseStartState) {
+        pushUndoState(eraseStartState);
+        eraseStartState = null;
+        scheduleAutoSave();
+      }
+    }
+    return;
   }
 
   if (isDrawing) {
     isDrawing = false;
     if (currentPath) {
-      elements.push(currentPath);
-      currentPath = null;
-      render();
-      scheduleAutoSave();
+      let isValid = false;
+      if (currentPath.type === 'path') {
+        if (currentPath.points.length === 1) {
+          // Click dot: duplicate point with tiny offset so canvas renders round dot
+          currentPath.points.push({
+            x: currentPath.points[0].x + 0.1,
+            y: currentPath.points[0].y + 0.1
+          });
+        }
+        isValid = currentPath.points.length >= 2;
+      } else {
+        const dist = Math.hypot(currentPath.x2 - currentPath.x1, currentPath.y2 - currentPath.y1);
+        isValid = dist >= 3;
+      }
+
+      if (isValid) {
+        if (drawStartState) {
+          pushUndoState(drawStartState);
+          drawStartState = null;
+        }
+        elements.push(currentPath);
+        currentPath = null;
+        render();
+        scheduleAutoSave();
+      } else {
+        // Discard zero-length element without affecting undo/redo stacks
+        currentPath = null;
+        drawStartState = null;
+        render();
+      }
     }
   }
 }
@@ -1211,6 +1413,7 @@ function handleWheel(e) {
   zoom = newZoom;
 
   render();
+  updateEraserCursorSize();
 }
 
 function applyZoom(factor) {
@@ -1223,32 +1426,316 @@ function applyZoom(factor) {
   zoom = newZoom;
 
   render();
+  updateEraserCursorSize();
 }
 
 function updateZoomIndicator() {
   zoomLevelEl.textContent = `${Math.round(zoom * 100)}%`;
 }
 
-// Eraser
-function eraseNear(cx, cy) {
-  const radius = currentSize * 8;
-  const initialLen = elements.length;
-  elements = elements.filter(el => {
-    if (el.type === 'path') {
-      return !el.points.some(p => Math.hypot(p.x - cx, p.y - cy) < radius);
-    } else if (el.type === 'line' || el.type === 'arrow') {
-      return Math.hypot((el.x1 + el.x2) / 2 - cx, (el.y1 + el.y2) / 2 - cy) > radius * 2;
-    }
-    const bbox = getElementBoundingBox(el);
-    if (bbox) {
-      return !(cx >= bbox.x && cx <= bbox.x + bbox.width && cy >= bbox.y && cy <= bbox.y + bbox.height);
-    }
-    return true;
-  });
+// ==================== Precise Circle Eraser System ====================
+let lastErasePoint = null;
+let eraseStartState = null;
+let eraseModified = false;
+const eraserCursor = document.getElementById('eraserCursor');
 
-  if (elements.length !== initialLen) {
+function getEraserRadius() {
+  switch (currentSize) {
+    case 2: return 12;
+    case 4: return 22;
+    case 8: return 38;
+    case 16: return 65;
+    default: return Math.max(8, currentSize * 4);
+  }
+}
+
+function updateEraserCursorPos(screenX, screenY) {
+  if (!eraserCursor) return;
+  if (currentTool !== 'eraser' || spacePressed || isPanning) {
+    eraserCursor.style.display = 'none';
+    wrapper.classList.remove('eraser-mode');
+    return;
+  }
+  const radius = getEraserRadius();
+  const screenRadius = radius * zoom;
+  const d = Math.round(screenRadius * 2);
+
+  eraserCursor.style.width = `${d}px`;
+  eraserCursor.style.height = `${d}px`;
+  eraserCursor.style.left = `${screenX}px`;
+  eraserCursor.style.top = `${screenY}px`;
+  eraserCursor.style.display = 'block';
+  wrapper.classList.add('eraser-mode');
+}
+
+function updateEraserCursorSize() {
+  if (!eraserCursor) return;
+  if (currentTool !== 'eraser' || spacePressed || isPanning) {
+    eraserCursor.style.display = 'none';
+    wrapper.classList.remove('eraser-mode');
+    return;
+  }
+  const radius = getEraserRadius();
+  const screenRadius = radius * zoom;
+  const d = Math.round(screenRadius * 2);
+  eraserCursor.style.width = `${d}px`;
+  eraserCursor.style.height = `${d}px`;
+}
+
+function hideEraserCursor() {
+  if (!eraserCursor) return;
+  eraserCursor.style.display = 'none';
+  wrapper.classList.remove('eraser-mode');
+}
+
+// Clip polyline path against circle (erases only what is strictly inside the circle)
+function clipPathByCircle(pathEl, cx, cy, radius) {
+  if (!pathEl.points || pathEl.points.length === 0) return [];
+
+  if (pathEl.points.length === 1) {
+    const d = Math.hypot(pathEl.points[0].x - cx, pathEl.points[0].y - cy);
+    return d < radius ? [] : [pathEl];
+  }
+
+  // Fast bounding box rejection check
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i < pathEl.points.length; i++) {
+    const p = pathEl.points[i];
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  }
+  const pad = (pathEl.size || 2);
+  if (cx + radius < minX - pad || cx - radius > maxX + pad ||
+      cy + radius < minY - pad || cy - radius > maxY + pad) {
+    return [pathEl];
+  }
+
+  const resultPaths = [];
+  let currentSub = [];
+
+  function pushSub(pts) {
+    if (!pts || pts.length === 0) return;
+    const clean = [pts[0]];
+    for (let k = 1; k < pts.length; k++) {
+      const prev = clean[clean.length - 1];
+      const curr = pts[k];
+      if (Math.hypot(curr.x - prev.x, curr.y - prev.y) > 0.05) {
+        clean.push(curr);
+      }
+    }
+    if (clean.length >= 2) {
+      resultPaths.push(clean);
+    } else if (clean.length === 1) {
+      resultPaths.push([clean[0], { x: clean[0].x + 0.1, y: clean[0].y + 0.1 }]);
+    }
+  }
+
+  const p0 = pathEl.points[0];
+  if (Math.hypot(p0.x - cx, p0.y - cy) >= radius) {
+    currentSub.push(p0);
+  }
+
+  for (let i = 0; i < pathEl.points.length - 1; i++) {
+    const A = pathEl.points[i];
+    const B = pathEl.points[i + 1];
+
+    const Dx = B.x - A.x;
+    const Dy = B.y - A.y;
+    const a = Dx * Dx + Dy * Dy;
+
+    if (a < 1e-9) continue;
+
+    const Fx = A.x - cx;
+    const Fy = A.y - cy;
+    const b = 2 * (Dx * Fx + Dy * Fy);
+    const c = Fx * Fx + Fy * Fy - radius * radius;
+    const delta = b * b - 4 * a * c;
+
+    if (delta <= 0) {
+      if (currentSub.length === 0) currentSub.push(A);
+      currentSub.push(B);
+      continue;
+    }
+
+    const sqrtDelta = Math.sqrt(delta);
+    const t1 = (-b - sqrtDelta) / (2 * a);
+    const t2 = (-b + sqrtDelta) / (2 * a);
+
+    const tInStart = Math.max(0, t1);
+    const tInEnd = Math.min(1, t2);
+
+    if (tInStart >= tInEnd) {
+      if (currentSub.length === 0) currentSub.push(A);
+      currentSub.push(B);
+      continue;
+    }
+
+    // Entering or cutting circle
+    if (t1 > 1e-6) {
+      if (currentSub.length === 0) currentSub.push(A);
+      const I1 = { x: A.x + t1 * Dx, y: A.y + t1 * Dy };
+      currentSub.push(I1);
+      pushSub(currentSub);
+      currentSub = [];
+    } else {
+      if (currentSub.length > 0) {
+        pushSub(currentSub);
+        currentSub = [];
+      }
+    }
+
+    // Exiting circle
+    if (t2 < 1 - 1e-6) {
+      const I2 = { x: A.x + t2 * Dx, y: A.y + t2 * Dy };
+      currentSub = [I2, B];
+    } else {
+      currentSub = [];
+    }
+  }
+
+  if (currentSub.length > 0) {
+    pushSub(currentSub);
+  }
+
+  return resultPaths.map(pts => ({ ...pathEl, points: pts }));
+}
+
+// Clip straight line or arrow against circle
+function clipLineOrArrow(el, cx, cy, radius) {
+  const A = { x: el.x1, y: el.y1 };
+  const B = { x: el.x2, y: el.y2 };
+  const Dx = B.x - A.x;
+  const Dy = B.y - A.y;
+  const a = Dx * Dx + Dy * Dy;
+
+  if (a < 1e-9) {
+    const d = Math.hypot(A.x - cx, A.y - cy);
+    return d < radius ? [] : [el];
+  }
+
+  const Fx = A.x - cx;
+  const Fy = A.y - cy;
+  const b = 2 * (Dx * Fx + Dy * Fy);
+  const c = Fx * Fx + Fy * Fy - radius * radius;
+  const delta = b * b - 4 * a * c;
+
+  if (delta <= 0) return [el];
+
+  const sqrtDelta = Math.sqrt(delta);
+  const t1 = (-b - sqrtDelta) / (2 * a);
+  const t2 = (-b + sqrtDelta) / (2 * a);
+
+  const tInStart = Math.max(0, t1);
+  const tInEnd = Math.min(1, t2);
+
+  if (tInStart >= tInEnd) return [el];
+
+  const hasStart = t1 > 1e-6;
+  const hasEnd = t2 < 1 - 1e-6;
+  const I1 = { x: A.x + t1 * Dx, y: A.y + t1 * Dy };
+  const I2 = { x: A.x + t2 * Dx, y: A.y + t2 * Dy };
+
+  if (hasStart && hasEnd) {
+    // Cut in middle: split into two pieces
+    if (el.type === 'arrow') {
+      return [
+        { type: 'line', color: el.color, size: el.size, x1: el.x1, y1: el.y1, x2: I1.x, y2: I1.y },
+        { ...el, x1: I2.x, y1: I2.y, x2: el.x2, y2: el.y2 }
+      ];
+    }
+    return [
+      { ...el, x1: el.x1, y1: el.y1, x2: I1.x, y2: I1.y },
+      { ...el, x1: I2.x, y1: I2.y, x2: el.x2, y2: el.y2 }
+    ];
+  } else if (hasStart) {
+    // End trimmed
+    if (el.type === 'arrow') {
+      return [{ type: 'line', color: el.color, size: el.size, x1: el.x1, y1: el.y1, x2: I1.x, y2: I1.y }];
+    }
+    return [{ ...el, x1: el.x1, y1: el.y1, x2: I1.x, y2: I1.y }];
+  } else if (hasEnd) {
+    // Start trimmed
+    return [{ ...el, x1: I2.x, y1: I2.y, x2: el.x2, y2: el.y2 }];
+  } else {
+    // Entire line inside circle
+    return [];
+  }
+}
+
+// Single step of circle erasing
+function eraseCircleStep(cx, cy, radius) {
+  let changed = false;
+  const newElements = [];
+
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+
+    // IMPORTANT: Ready images added to the board are NEVER erased by the eraser!
+    if (el.type === 'image') {
+      newElements.push(el);
+      continue;
+    }
+
+    if (el.type === 'path') {
+      const clipped = clipPathByCircle(el, cx, cy, radius);
+      if (clipped.length !== 1 || clipped[0] !== el) {
+        changed = true;
+      }
+      for (let k = 0; k < clipped.length; k++) {
+        newElements.push(clipped[k]);
+      }
+    } else if (el.type === 'line' || el.type === 'arrow') {
+      const clipped = clipLineOrArrow(el, cx, cy, radius);
+      if (clipped.length !== 1 || clipped[0] !== el) {
+        changed = true;
+      }
+      for (let k = 0; k < clipped.length; k++) {
+        newElements.push(clipped[k]);
+      }
+    } else if (el.type === 'rect' || el.type === 'mux' || el.type === 'alu' || el.type === 'text') {
+      const bbox = getElementBoundingBox(el);
+      if (bbox && cx >= bbox.x && cx <= bbox.x + bbox.width && cy >= bbox.y && cy <= bbox.y + bbox.height) {
+        changed = true;
+        // removed
+      } else {
+        newElements.push(el);
+      }
+    } else {
+      newElements.push(el);
+    }
+  }
+
+  if (changed) {
+    elements = newElements;
+    if (selectedElement && !elements.includes(selectedElement)) {
+      selectedElement = null;
+    }
+  }
+  return changed;
+}
+
+// Erase along drag segment with interpolation so fast mouse movement leaves no gaps
+function eraseAlongSegment(x1, y1, x2, y2) {
+  const radius = getEraserRadius();
+  const dist = Math.hypot(x2 - x1, y2 - y1);
+  const step = Math.max(4, radius * 0.4);
+  const steps = Math.max(1, Math.ceil(dist / step));
+  let anyChange = false;
+
+  for (let s = 1; s <= steps; s++) {
+    const t = s / steps;
+    const cx = x1 + (x2 - x1) * t;
+    const cy = y1 + (y2 - y1) * t;
+    if (eraseCircleStep(cx, cy, radius)) {
+      anyChange = true;
+    }
+  }
+
+  if (anyChange) {
+    eraseModified = true;
     render();
-    scheduleAutoSave();
   }
 }
 
@@ -1278,7 +1765,11 @@ function promptAddText(screenX, screenY, canvasX, canvasY) {
   document.body.appendChild(input);
   input.focus();
 
+  let committed = false;
+
   function commitText() {
+    if (committed) return;
+    committed = true;
     const text = input.value.trim();
     if (text) {
       recordState();
@@ -1293,7 +1784,9 @@ function promptAddText(screenX, screenY, canvasX, canvasY) {
       render();
       scheduleAutoSave();
     }
-    input.remove();
+    if (input.parentNode) {
+      input.remove();
+    }
   }
 
   input.addEventListener('keydown', (e) => {
@@ -1301,7 +1794,8 @@ function promptAddText(screenX, screenY, canvasX, canvasY) {
       e.preventDefault();
       commitText();
     } else if (e.key === 'Escape') {
-      input.remove();
+      committed = true;
+      if (input.parentNode) input.remove();
     }
   });
 
@@ -1354,20 +1848,35 @@ function addImageFromFile(file, posX, posY) {
       elements.push(el);
       selectedElement = el;
       render();
-      saveToAI();
+      scheduleAutoSave();
     };
     img.src = event.target.result;
   };
   reader.readAsDataURL(file);
 }
 
-// AI Synchronization (Export PNG & JSON to server)
+// Local Auto-Save (Saves vector state locally in browser; does NOT generate image prints to disk!)
 function scheduleAutoSave() {
-  showSyncBadge('Alterações pendentes...', 'saving');
+  showSyncBadge('● Salvo no navegador', 'synced');
   if (autoSaveTimer) clearTimeout(autoSaveTimer);
   autoSaveTimer = setTimeout(() => {
-    saveToAI(false);
-  }, 3500);
+    try {
+      const serializableElements = elements.map(el => {
+        const copy = { ...el };
+        delete copy.imgObj;
+        return copy;
+      });
+      const stateObj = { elements: serializableElements, zoom, panX, panY };
+      localStorage.setItem('whiteboard_state', JSON.stringify(stateObj));
+
+      // Quietly sync JSON elements state to server without any image/print generation
+      fetch('/api/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: stateObj })
+      }).catch(() => {});
+    } catch (e) {}
+  }, 600);
 }
 
 async function saveToAI(manual = false) {
@@ -1474,6 +1983,27 @@ function showToast(msg) {
 }
 
 async function loadSavedBoard() {
+  // 1. First restore from localStorage (instant and offline)
+  try {
+    const local = localStorage.getItem('whiteboard_state');
+    if (local) {
+      const data = JSON.parse(local);
+      if (data && data.elements && data.elements.length > 0) {
+        elements = data.elements;
+        if (data.zoom) zoom = data.zoom;
+        if (data.panX !== undefined) panX = data.panX;
+        if (data.panY !== undefined) panY = data.panY;
+        rehydrateImages();
+        setTimeout(() => {
+          render();
+          showSyncBadge('● Salvo no navegador', 'synced');
+        }, 100);
+        return;
+      }
+    }
+  } catch (e) {}
+
+  // 2. Fallback to /current_board.json from server
   try {
     const res = await fetch('/current_board.json');
     if (res.ok) {
@@ -1483,7 +2013,7 @@ async function loadSavedBoard() {
         rehydrateImages();
         setTimeout(() => {
           fitToScreen();
-          showSyncBadge('● Sincronizado com IA', 'synced');
+          showSyncBadge('● Sincronizado', 'synced');
         }, 150);
       }
     }
@@ -1551,6 +2081,17 @@ function setupHotkeys() {
       return;
     }
 
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (selectedElement) {
+        recordState();
+        elements = elements.filter(el => el !== selectedElement);
+        selectedElement = null;
+        render();
+        scheduleAutoSave();
+        return;
+      }
+    }
+
     const key = e.key.toLowerCase();
     if (key === 'f') {
       fitToScreen();
@@ -1575,11 +2116,7 @@ function setupHotkeys() {
     };
 
     if (toolMap[key]) {
-      currentTool = toolMap[key];
-      document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-      const btn = document.querySelector(`.tool-btn[data-tool="${currentTool}"]`);
-      if (btn) btn.classList.add('active');
-      render();
+      setActiveTool(toolMap[key]);
     }
   });
 
@@ -1588,6 +2125,10 @@ function setupHotkeys() {
       spacePressed = false;
       wrapper.classList.remove('pan-mode');
       wrapper.classList.remove('panning');
+      if (currentTool === 'eraser') {
+        wrapper.classList.add('eraser-mode');
+        updateEraserCursorSize();
+      }
     }
   });
 }

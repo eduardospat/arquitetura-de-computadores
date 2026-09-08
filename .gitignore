@@ -3,3 +3,5 @@ __pycache__/
 *.pyo
 whiteboard/snapshots/*.png
 !whiteboard/snapshots/.gitkeep
+snapshots/*.png
+

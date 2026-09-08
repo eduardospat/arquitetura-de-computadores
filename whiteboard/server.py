@@ -22,10 +22,8 @@ from datetime import datetime
 PORT = 8080
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(BASE_DIR)
-SNAPSHOTS_DIR = os.path.join(BASE_DIR, 'snapshots')
 TEMPLATES_DIR = os.path.join(BASE_DIR, 'templates')
 
-os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
 # Curated catalog of all course diagrams
@@ -423,11 +421,6 @@ class WhiteboardHandler(http.server.SimpleHTTPRequestHandler):
                         f.write(img_bytes)
                 except Exception:
                     pass
-
-                # Save snapshot
-                snapshot_png = os.path.join(SNAPSHOTS_DIR, f'snapshot_{timestamp_str}.png')
-                with open(snapshot_png, 'wb') as f:
-                    f.write(img_bytes)
 
             # Save current_board.json (vector elements)
             current_json = os.path.join(BASE_DIR, 'current_board.json')
