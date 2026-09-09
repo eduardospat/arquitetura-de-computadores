@@ -23,7 +23,9 @@ from datetime import datetime
 
 PORT = 8080
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_DIR = os.path.dirname(BASE_DIR)
+if not os.path.exists(os.path.join(BASE_DIR, "index.html")) and os.path.exists(os.path.join(BASE_DIR, "whiteboard", "index.html")):
+    BASE_DIR = os.path.join(BASE_DIR, "whiteboard")
+REPO_DIR = os.path.dirname(BASE_DIR) if os.path.basename(BASE_DIR) == 'whiteboard' else BASE_DIR
 TEMPLATES_DIR = os.path.join(BASE_DIR, 'templates')
 
 os.makedirs(TEMPLATES_DIR, exist_ok=True)

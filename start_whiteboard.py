@@ -5,12 +5,10 @@ Usage: python start_whiteboard.py
 """
 import os
 import sys
+import subprocess
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 whiteboard_server = os.path.join(base_dir, 'whiteboard', 'server.py')
 
 if __name__ == '__main__':
-    os.chdir(os.path.join(base_dir, 'whiteboard'))
-    with open('server.py', 'r', encoding='utf-8') as f:
-        code = f.read()
-    exec(compile(code, 'server.py', 'exec'))
+    sys.exit(subprocess.call([sys.executable, whiteboard_server] + sys.argv[1:]))

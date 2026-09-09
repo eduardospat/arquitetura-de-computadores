@@ -18,6 +18,9 @@ if hasattr(sys.stdout, 'reconfigure'):
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CLOUDFLARED = os.path.join(BASE_DIR, 'cloudflared.exe')
 
+import shutil
+import urllib.request
+
 def copy_to_clipboard(text):
     try:
         p = subprocess.Popen('clip', stdin=subprocess.PIPE, shell=True)
@@ -30,13 +33,31 @@ def is_port_in_use(port=8080):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         return s.connect_ex(('127.0.0.1', port)) == 0
 
+def ensure_cloudflared():
+    if os.path.exists(CLOUDFLARED):
+        return CLOUDFLARED
+    which_cf = shutil.which('cloudflared')
+    if which_cf:
+        return which_cf
+    print("⏳ cloudflared.exe não encontrado. Baixando oficial da Cloudflare...")
+    url = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe'
+    try:
+        urllib.request.urlretrieve(url, CLOUDFLARED)
+        print("✅ cloudflared.exe baixado com sucesso!")
+        return CLOUDFLARED
+    except Exception as e:
+        print(f"❌ Não foi possível baixar cloudflared automaticamente: {e}")
+        return None
+
 def main():
     print("=" * 70)
     print(" 🚀 INICIANDO TÚNEL DE COLABORAÇÃO - WHITEBOARD MIPS")
     print("=" * 70)
 
-    if not os.path.exists(CLOUDFLARED):
-        print(f"Erro: {CLOUDFLARED} não foi encontrado.")
+    cf_bin = ensure_cloudflared()
+    if not cf_bin:
+        print(f"Erro: Não foi possível obter o binário do cloudflared.")
+        print("Você também pode rodar alternativamente: npx localtunnel --port 8080")
         sys.exit(1)
 
     if not is_port_in_use(8080):
@@ -48,7 +69,7 @@ def main():
 
     print("\n⏳ Conectando aos servidores da Cloudflare...")
     cmd = [
-        CLOUDFLARED,
+        cf_bin,
         'tunnel',
         '--edge-ip-version', '4',
         '--protocol', 'http2',
