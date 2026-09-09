@@ -75,6 +75,27 @@ TEMPLATES_CATALOG = [
         "badge": "Prova",
         "desc": "Enunciado e diagrama multiciclo original da Questão 3 da prova."
     },
+    {
+        "filename": "prova2024_pag_1_desempenho_sinais.jpg",
+        "title": "🏆 Prova 2024 - Pág 1: Desempenho e Sinais (Add, Beq, Lw)",
+        "category": "🏆 Prova Real (UFSM)",
+        "badge": "Prova",
+        "desc": "Questões 1, 2 e 3 da Prova 2024 (Nota 10,0). Cálculo de CPI e falhas de sinais no Mono e Multiciclo."
+    },
+    {
+        "filename": "prova2024_pag_2_jal_datapath.jpg",
+        "title": "🏆 Prova 2024 - Pág 2: Datapaths JAL (Mono e Multi)",
+        "category": "🏆 Prova Real (UFSM)",
+        "badge": "Prova",
+        "desc": "Questão 4 da Prova 2024 (4.5 pts). Adicionar instrução JAL no Monociclo e no Multiciclo."
+    },
+    {
+        "filename": "prova2024_pag_3_jal_fsm.jpg",
+        "title": "🏆 Prova 2024 - Pág 3: FSM Multiciclo JAL",
+        "category": "🏆 Prova Real (UFSM)",
+        "badge": "Prova",
+        "desc": "Questão 4 da Prova 2024. Máquina de estados completa para adicionar os passos de JAL."
+    },
 
     # 1. Incompletos para Praticar / Preencher
     {

@@ -71,8 +71,6 @@ def main():
     cmd = [
         cf_bin,
         'tunnel',
-        '--edge-ip-version', '4',
-        '--protocol', 'http2',
         '--url', 'http://localhost:8080'
     ]
 
@@ -95,7 +93,7 @@ def main():
         if m:
             url = m.group(0)
             break
-        if time.time() - start_time > 30:
+        if time.time() - start_time > 35:
             break
 
     if not url:
@@ -104,21 +102,35 @@ def main():
         proc.terminate()
         sys.exit(1)
 
+    # Pequena pausa para propagação do DNS nos servidores da Cloudflare
+    time.sleep(3)
     copied = copy_to_clipboard(url)
 
     print("\n" + "=" * 70)
     print(" 🎉 TÚNEL ATIVO COM SUCESSO!")
     print("=" * 70)
-    print(f"\n 🔗 SEU LINK PÚBLICO:\n    👉  {url}  👈\n")
+    print(f"\n 🔗 LINK PÚBLICO (Para amigos pela Internet):\n    👉  {url}  👈\n")
     if copied:
         print(" 📋 [COPIADO!] O link já está na sua área de transferência.")
         print("    Basta dar Ctrl + V no WhatsApp ou Discord do seu amigo!")
     else:
         print(" 📋 Copie o link acima e envie para seu amigo.")
+
     print("\n" + "-" * 70)
-    print(" ⚠️  IMPORTANTE: NÃO FECHE ESTA JANELA!")
-    print(" O túnel precisa ficar aberto aqui enquanto vocês estiverem usando.")
-    print(" Quando terminarem de estudar, basta fechar a janela ou teclar Ctrl + C.")
+    print(" 💡 DICAS IMPORTANTES:")
+    print(" 1. NO SEU PC: Você não precisa usar esse link. Use http://localhost:8080")
+    print(" 2. NO MESMO WI-FI: No outro PC/celular na mesma casa, é mais rápido usar:")
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        print(f"    👉  http://{local_ip}:8080")
+    except Exception:
+        pass
+    print(" 3. DNS: Se abrir pela internet der 'DNS_PROBE', aguarde 10 segundos")
+    print("    para o domínio propagar e atualize a página (F5).")
+    print(" 4. NÃO FECHE ESTA JANELA! Se fechar, o túnel cai na hora.")
     print("=" * 70 + "\n")
 
     sys.stdout.flush()
