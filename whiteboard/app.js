@@ -1033,10 +1033,16 @@ function setActiveTool(tool) {
 
 // ==================== Mouse & Touch Event Listeners ====================
 function setupEventListeners() {
-  // Canvas pointer events
-  canvas.addEventListener('mousedown', handlePointerDown);
-  window.addEventListener('mousemove', handlePointerMove);
-  window.addEventListener('mouseup', handlePointerUp);
+  // Canvas pointer events (Suporte total a Mesa Digitalizadora / Stylus, Touch e Mouse)
+  canvas.addEventListener('pointerdown', handlePointerDown);
+  window.addEventListener('pointermove', handlePointerMove);
+  window.addEventListener('pointerup', handlePointerUp);
+  window.addEventListener('pointercancel', handlePointerUp);
+
+  // Previne menu de contexto ao usar botão da caneta ou toque longo
+  canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+  });
 
   // Wrapper cursor tracking
   wrapper.addEventListener('mouseleave', () => {
@@ -1215,6 +1221,16 @@ function setupEventListeners() {
 
 // Pointer event handlers
 function handlePointerDown(e) {
+  // Captura o ponteiro e previne comportamentos de arrasto/gestos nativos do Windows Ink / touch
+  if (e.pointerId !== undefined && canvas.setPointerCapture) {
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch (err) {}
+  }
+  if (e.cancelable) {
+    e.preventDefault();
+  }
+
   const rect = canvas.getBoundingClientRect();
   const mouseX = e.clientX - rect.left;
   const mouseY = e.clientY - rect.top;
@@ -1301,6 +1317,10 @@ function handlePointerDown(e) {
 }
 
 function handlePointerMove(e) {
+  if (isDrawing || isPanning || isDraggingElement) {
+    if (e.cancelable) e.preventDefault();
+  }
+
   if (isPanning) {
     panX = e.clientX - startPanX;
     panY = e.clientY - startPanY;
@@ -1365,7 +1385,15 @@ function handlePointerMove(e) {
 
   if (currentPath) {
     if (currentPath.type === 'path') {
-      currentPath.points.push({ x: pt.x, y: pt.y });
+      const subEvents = (e.getCoalescedEvents && typeof e.getCoalescedEvents === 'function')
+        ? e.getCoalescedEvents()
+        : [e];
+      for (const ev of subEvents) {
+        const subMouseX = ev.clientX - rect.left;
+        const subMouseY = ev.clientY - rect.top;
+        const subPt = screenToCanvas(subMouseX, subMouseY);
+        currentPath.points.push({ x: subPt.x, y: subPt.y });
+      }
       broadcastLiveStroke(currentPath);
     } else {
       currentPath.x2 = pt.x;
@@ -1375,7 +1403,12 @@ function handlePointerMove(e) {
   }
 }
 
-function handlePointerUp() {
+function handlePointerUp(e) {
+  if (e && e.pointerId !== undefined && canvas.releasePointerCapture) {
+    try {
+      canvas.releasePointerCapture(e.pointerId);
+    } catch (err) {}
+  }
   if (isPanning) {
     isPanning = false;
     wrapper.classList.remove('panning');

@@ -442,6 +442,16 @@ select:focus {
   background-size: 30px 30px;
   overflow: hidden;
   cursor: crosshair;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#whiteboardCanvas {
+  display: block;
+  touch-action: none;
+  -webkit-touch-callout: none;
 }
 
 .canvas-container.pan-mode {

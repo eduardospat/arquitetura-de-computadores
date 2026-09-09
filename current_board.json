@@ -395,6 +395,22 @@
           "y": -1397.5666666666666
         }
       ]
+    },
+    {
+      "type": "image",
+      "src": "templates/prova_q1_add3.jpg",
+      "x": 8436,
+      "y": -1398,
+      "width": 1433,
+      "height": 764
+    },
+    {
+      "type": "image",
+      "src": "templates/prova2024_pag_1_desempenho_sinais.jpg",
+      "x": 9949,
+      "y": -1398,
+      "width": 574,
+      "height": 764
     }
   ]
 }
