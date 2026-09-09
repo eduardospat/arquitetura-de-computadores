@@ -21,7 +21,7 @@ import uuid
 import webbrowser
 from datetime import datetime
 
-PORT = 8080
+PORT = 8765
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if not os.path.exists(os.path.join(BASE_DIR, "index.html")) and os.path.exists(os.path.join(BASE_DIR, "whiteboard", "index.html")):
     BASE_DIR = os.path.join(BASE_DIR, "whiteboard")
@@ -352,6 +352,34 @@ def load_initial_elements():
             print(f"Aviso ao carregar current_board.json inicial: {e}")
 
 load_initial_elements()
+for element in current_board_elements:
+    element.setdefault('id', str(uuid.uuid4()))
+
+
+def apply_board_patch(changes):
+    """Apply only changes whose previous value still matches the shared board."""
+    result = []
+    for change in changes:
+        element_id = change.get('id')
+        if not element_id:
+            continue
+        index = next((i for i, el in enumerate(current_board_elements) if el.get('id') == element_id), None)
+        current = current_board_elements[index] if index is not None else None
+        after = change.get('after')
+        if current == change.get('before') and (after is None or after.get('id') == element_id):
+            if after is None:
+                if index is not None:
+                    current_board_elements.pop(index)
+            elif index is not None:
+                current_board_elements[index] = after
+            else:
+                position = change.get('afterIndex', len(current_board_elements))
+                current_board_elements.insert(position, after)
+        index = next((i for i, el in enumerate(current_board_elements) if el.get('id') == element_id), None)
+        result.append({'id': element_id, 'after': current_board_elements[index] if index is not None else None,
+                       'afterIndex': index})
+    return result
+
 
 def save_elements_to_disk():
     """Save vector elements to current_board.json (does NOT create image prints)."""
@@ -591,6 +619,12 @@ try:
                     msg["clientId"] = client_id
                     await broadcast(msg, exclude=client_id)
 
+                elif msg_type == "board_patch":
+                    changes = apply_board_patch(msg.get('changes', []))
+                    schedule_save_elements()
+                    # Echo the canonical result, including rejected stale edits.
+                    await broadcast({'type': 'board_patch', 'changes': changes, 'clientId': client_id})
+
                 elif msg_type == "element_add":
                     el = msg.get("element")
                     if el:
@@ -652,15 +686,13 @@ def run_server(port=PORT, open_browser=True):
     global ACTUAL_PORT
     actual_port = port
 
-    # Check port availability
-    for p in range(port, port + 10):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.bind(("", p))
-                actual_port = p
-                break
-            except OSError:
-                continue
+    # Keep the port shared with the tunnel; never silently choose another one.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("", port))
+        except OSError as error:
+            raise SystemExit(f"Porta {port} ocupada. Execute ./fechar_servidor.sh antes de iniciar.") from error
 
     ACTUAL_PORT = actual_port
     local_ip = get_local_ip()

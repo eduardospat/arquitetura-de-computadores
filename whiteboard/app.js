@@ -35,6 +35,7 @@ let startY = 0;
 let elements = []; // { type: 'path'|'line'|'arrow'|'rect'|'mux'|'alu'|'text'|'image', ... }
 let undoStack = [];
 let redoStack = [];
+let pendingUndoState = null;
 const MAX_UNDO_STACK = 100;
 let currentPath = null;
 let drawStartState = null;
@@ -467,7 +468,18 @@ function canvasToScreen(cx, cy) {
 // Image cache for fast, flicker-free undo/redo
 const imageCache = new Map();
 
+function ensureElementIds() {
+  const seen = new Set();
+  for (const el of elements) {
+    if (!el.id || seen.has(el.id)) {
+      el.id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+    }
+    seen.add(el.id);
+  }
+}
+
 function serializeBoardState() {
+  ensureElementIds();
   return JSON.stringify(elements, (key, value) => {
     if (key === 'imgObj') return undefined;
     return value;
@@ -489,64 +501,104 @@ function updateUndoRedoUI() {
   }
 }
 
-// Push state to undo stack (with deduplication)
-function pushUndoState(stateStr) {
-  if (!stateStr) return;
-  // Prevent duplicate consecutive entries
-  if (undoStack.length > 0 && undoStack[undoStack.length - 1] === stateStr) {
-    return;
-  }
-  undoStack.push(stateStr);
-  if (undoStack.length > MAX_UNDO_STACK) undoStack.shift();
-  redoStack = [];
-  updateUndoRedoUI();
+// Each history entry contains only the changes made by this browser.
+function boardChanges(before, after) {
+  const old = new Map(before.map((el, index) => [el.id, { el, index }]));
+  const next = new Map(after.map((el, index) => [el.id, { el, index }]));
+  return [...new Set([...old.keys(), ...next.keys()])].flatMap(id => {
+    const a = old.get(id), b = next.get(id);
+    if (JSON.stringify(a?.el) === JSON.stringify(b?.el)) return [];
+    return [{ id, before: a?.el || null, after: b?.el || null,
+      beforeIndex: a?.index, afterIndex: b?.index }];
+  });
 }
 
-// Save state for Undo/Redo
+function applyBoardChanges(board, changes) {
+  const result = board.slice();
+  for (const change of changes) {
+    const index = result.findIndex(el => el.id === change.id);
+    if (change.after === null) {
+      if (index >= 0) result.splice(index, 1);
+    } else {
+      if (index >= 0) result.splice(index, 1);
+      const position = change.afterIndex ?? (index >= 0 ? index : result.length);
+      // History values must remain immutable when the restored element is edited.
+      result.splice(position, 0, JSON.parse(JSON.stringify(change.after)));
+    }
+  }
+  return result;
+}
+
+function pushUndoState(stateStr) {
+  pendingUndoState = stateStr;
+}
+
 function recordState() {
   pushUndoState(serializeBoardState());
   scheduleAutoSave();
 }
 
-function restoreBoardState(stateStr) {
-  if (!stateStr) return;
-  try {
-    elements = JSON.parse(stateStr);
+function commitLocalAction() {
+  if (pendingUndoState === null) return false;
+  const changes = boardChanges(JSON.parse(pendingUndoState), JSON.parse(serializeBoardState()));
+  pendingUndoState = null;
+  if (changes.length) {
+    undoStack.push(changes);
+    if (undoStack.length > MAX_UNDO_STACK) undoStack.shift();
+    redoStack = [];
+    sendWsMessage({ type: 'board_patch', changes });
+  }
+  updateUndoRedoUI();
+  return true;
+}
+
+function reverseChanges(changes) {
+  return changes.map(change => ({ id: change.id, before: change.after, after: change.before,
+    beforeIndex: change.afterIndex, afterIndex: change.beforeIndex }));
+}
+
+function travelHistory(from, to, label) {
+  if (isDrawing || isDraggingElement || from.length === 0) return;
+  const current = JSON.parse(serializeBoardState());
+  const changes = reverseChanges(from.pop()).filter(change => {
+    const el = current.find(el => el.id === change.id) || null;
+    // Preserve subsequent edits by another participant to the same element.
+    return JSON.stringify(el) === JSON.stringify(change.before);
+  });
+  if (changes.length) {
+    elements = applyBoardChanges(current, changes);
+    to.push(changes);
+    if (to.length > MAX_UNDO_STACK) to.shift();
     selectedElement = null;
-    isDraggingElement = false;
     rehydrateImages();
     render();
-  } catch (err) {
-    console.error('Erro ao restaurar estado do quadro:', err);
+    scheduleAutoSave();
+    sendWsMessage({ type: 'board_patch', changes });
   }
+  updateUndoRedoUI();
+  showSyncBadge(changes.length ? label : 'Ação já alterada por outro participante', 'saving');
 }
 
 function undo() {
-  if (undoStack.length === 0) return;
-  const currentState = serializeBoardState();
-  redoStack.push(currentState);
-  if (redoStack.length > MAX_UNDO_STACK) redoStack.shift();
-
-  const prevState = undoStack.pop();
-  restoreBoardState(prevState);
-  updateUndoRedoUI();
-  scheduleAutoSave();
-  broadcastBoardSync();
-  showSyncBadge('Ação desfeita (Undo)', 'saving');
+  travelHistory(undoStack, redoStack, 'Sua ação foi desfeita');
 }
 
 function redo() {
-  if (redoStack.length === 0) return;
-  const currentState = serializeBoardState();
-  undoStack.push(currentState);
-  if (undoStack.length > MAX_UNDO_STACK) undoStack.shift();
+  travelHistory(redoStack, undoStack, 'Sua ação foi refeita');
+}
 
-  const nextState = redoStack.pop();
-  restoreBoardState(nextState);
-  updateUndoRedoUI();
-  scheduleAutoSave();
-  broadcastBoardSync();
-  showSyncBadge('Ação refeita (Redo)', 'saving');
+// Remote changes also update the starting point of an ongoing gesture,
+// so they are never recorded as part of that local action.
+function receiveBoardChanges(changes) {
+  const rebase = state => state === null ? null : JSON.stringify(applyBoardChanges(JSON.parse(state), changes));
+  pendingUndoState = rebase(pendingUndoState);
+  drawStartState = rebase(drawStartState);
+  dragStartState = rebase(dragStartState);
+  eraseStartState = rebase(eraseStartState);
+  elements = applyBoardChanges(elements, changes);
+  if (selectedElement) selectedElement = elements.find(el => el.id === selectedElement.id) || null;
+  rehydrateImages();
+  render();
 }
 
 function rehydrateImages() {
@@ -2308,6 +2360,10 @@ function handleWsMessage(msg) {
   switch (msg.type) {
     case 'init': {
       wsClientId = msg.clientId;
+      undoStack = [];
+      redoStack = [];
+      pendingUndoState = null;
+      updateUndoRedoUI();
       const count = msg.userCount || 1;
       updateCollabUI(count, true);
 
@@ -2372,11 +2428,17 @@ function handleWsMessage(msg) {
       break;
     }
 
+    case 'board_patch': {
+      peerLiveStrokes.delete(msg.clientId);
+      receiveBoardChanges(msg.changes || []);
+      break;
+    }
+
     case 'element_add': {
       if (msg.clientId === wsClientId) return;
       peerLiveStrokes.delete(msg.clientId);
       if (msg.element) {
-        elements.push(msg.element);
+        receiveBoardChanges([{ id: msg.element.id, after: msg.element }]);
         if (msg.element.type === 'image') {
           rehydrateImages();
         }
@@ -2389,7 +2451,7 @@ function handleWsMessage(msg) {
       if (msg.clientId === wsClientId) return;
       peerLiveStrokes.delete(msg.clientId);
       if (Array.isArray(msg.elements)) {
-        elements = msg.elements;
+        receiveBoardChanges(boardChanges(JSON.parse(serializeBoardState()), msg.elements));
         selectedElement = null;
         rehydrateImages();
         render();
@@ -2400,7 +2462,7 @@ function handleWsMessage(msg) {
     case 'board_clear': {
       if (msg.clientId === wsClientId) return;
       peerLiveStrokes.clear();
-      elements = [];
+      receiveBoardChanges(boardChanges(JSON.parse(serializeBoardState()), []));
       selectedElement = null;
       render();
       showToast('🧹 O quadro foi limpo por outro participante.');
@@ -2440,6 +2502,7 @@ function broadcastLiveStroke(pathEl) {
 }
 
 function broadcastElementAdd(el) {
+  if (commitLocalAction()) return;
   if (!el) return;
   const clean = { ...el };
   delete clean.imgObj;
@@ -2450,6 +2513,8 @@ function broadcastElementAdd(el) {
 }
 
 function broadcastBoardSync() {
+  if (commitLocalAction()) return;
+  ensureElementIds();
   const cleanElements = elements.map(el => {
     const copy = { ...el };
     delete copy.imgObj;
@@ -2462,6 +2527,7 @@ function broadcastBoardSync() {
 }
 
 function broadcastBoardClear() {
+  if (commitLocalAction()) return;
   sendWsMessage({
     type: 'board_clear'
   });

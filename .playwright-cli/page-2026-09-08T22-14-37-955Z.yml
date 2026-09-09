@@ -1,0 +1,468 @@
+- generic [active] [ref=f1e1]:
+  - generic [ref=f1e2]:
+    - banner [ref=f1e3]:
+      - generic [ref=f1e4]:
+        - generic [ref=f1e5]: ⚡
+        - generic [ref=f1e6]: Whiteboard MIPS
+      - generic [ref=f1e8]:
+        - button "📁 Galeria de Diagramas" [ref=f1e9] [cursor=pointer]:
+          - text: 📁
+          - generic [ref=f1e10]: Galeria de Diagramas
+        - combobox "Selecione um diagrama para carregar imediatamente" [ref=f1e11] [cursor=pointer]:
+          - option "-- Carregamento Rápido --" [selected]
+          - option "Monociclo em Branco (Sem Linhas de Controle)"
+          - option "Multiciclo em Branco (Bloco Operacional com MUXes)"
+          - option "Monociclo Básico (ADD, SUB, LW, SW)"
+          - option "Monociclo Inicial (Apenas Banco de Registradores e ULA)"
+          - option "Multiciclo Inicial (Registradores Internos)"
+          - option "Monociclo Completo com Controle"
+          - option "Monociclo Completo com Jump"
+          - option "Tabela de Sinais de Controle (Monociclo)"
+          - option "Multiciclo Completo com Controle"
+          - option "FSM Multiciclo Completa (10 Estados)"
+          - option "Multiciclo Completo com Exceções"
+          - option "FSM Completa com Exceções (Estados 10 e 11)"
+          - 'option "Passo 1: Busca de Instrução (IR = Mem[PC]; PC = PC + 4)"'
+          - 'option "Passo 2: Decodificação e Branch Antecipado"'
+          - 'option "Passo 3: Execução Tipo R (ALUOut = A op B)"'
+          - 'option "Passo 4: Write-Back Tipo R (Reg[rd] = ALUOut)"'
+          - 'option "Passo 3: Memória (Cálculo de Endereço A + offset)"'
+          - 'option "Passo 4: Leitura da Memória (MDR = Mem[ALUOut])"'
+          - 'option "Passo 5: Write-Back LW (Reg[rt] = MDR)"'
+          - 'option "Passo 4: Escrita na Memória SW (Mem[ALUOut] = B)"'
+          - 'option "Passo 3: Decisão de Branch (if A == B then PC = ALUOut)"'
+          - 'option "Passo 3: Salto Incondicional Jump"'
+          - 'option "Exercício 4.1: Sinais e Recursos da Instrução AND"'
+          - 'option "Exercício 4.2: Implementando Nova Instrução LWI Rt, Rd(Rs)"'
+          - 'option "Exercício 4.3: Latências, Multiplicador e Speedup"'
+          - 'option "Exercício 4.4: Caminho Crítico e Tempo de Relógio"'
+          - 'option "Exercício 5.8: Adicionando Instrução JR $ra (Jump Register)"'
+          - 'option "Exercício 5.11 a 5.14: LWPI (Pós-Incremento) e SWAP"'
+          - 'option "Exercício 5.29: Falhas Presas (Stuck-at) no Multiciclo"'
+          - 'option "Exercício 5.49 e 5.50: Instrução ERET e Tratamento de Exceções"'
+      - generic [ref=f1e12]:
+        - generic "Status de sincronização com o assistente de IA" [ref=f1e13]: Pronto
+        - button "💾 Salvar para IA" [ref=f1e16] [cursor=pointer]:
+          - text: 💾
+          - generic [ref=f1e17]: Salvar para IA
+        - button "📥 Baixar PNG" [ref=f1e18] [cursor=pointer]:
+          - text: 📥
+          - generic [ref=f1e19]: Baixar PNG
+        - button "📖 Fórmulas & FSM" [ref=f1e20] [cursor=pointer]:
+          - text: 📖
+          - generic [ref=f1e21]: Fórmulas & FSM
+    - generic [ref=f1e22]:
+      - complementary [ref=f1e23]:
+        - generic [ref=f1e24]:
+          - generic [ref=f1e25]: FERRAMENTAS
+          - button "◀" [ref=f1e26] [cursor=pointer]
+        - generic [ref=f1e27]:
+          - button "Caneta" [ref=f1e28] [cursor=pointer]
+          - button "Destaque" [ref=f1e32] [cursor=pointer]
+          - button "Seta" [ref=f1e36] [cursor=pointer]
+          - button "Linha" [ref=f1e40] [cursor=pointer]
+          - button "Bloco" [ref=f1e44] [cursor=pointer]
+          - button "MUX" [ref=f1e48] [cursor=pointer]
+          - button "ULA" [ref=f1e52] [cursor=pointer]
+          - button "Texto" [ref=f1e56] [cursor=pointer]
+          - button "Mover" [ref=f1e60] [cursor=pointer]
+          - button "Borracha" [ref=f1e64] [cursor=pointer]
+          - button "Pan" [ref=f1e68] [cursor=pointer]
+        - generic [ref=f1e73]:
+          - generic "Preto/Grafite (Geral)" [ref=f1e74] [cursor=pointer]
+          - generic "Vermelho (Sinais de Controle / Escrita)" [ref=f1e75] [cursor=pointer]
+          - generic "Azul (Barramento de Dados / PC)" [ref=f1e76] [cursor=pointer]
+          - generic "Verde (ALU Out / Sucesso)" [ref=f1e77] [cursor=pointer]
+          - generic "Roxo (Seleções MUX / Desvio)" [ref=f1e78] [cursor=pointer]
+          - generic "Laranja (Caminho Crítico / Atraso)" [ref=f1e79] [cursor=pointer]
+          - generic "Ciano" [ref=f1e80] [cursor=pointer]
+        - generic [ref=f1e81]:
+          - button "●" [ref=f1e82] [cursor=pointer]
+          - button "●" [ref=f1e83] [cursor=pointer]
+          - button "●" [ref=f1e84] [cursor=pointer]
+          - button "●" [ref=f1e85] [cursor=pointer]
+        - generic [ref=f1e87]:
+          - generic "Inserir Imagem do Computador" [ref=f1e88] [cursor=pointer]: Upload
+          - button "Limpar" [ref=f1e92] [cursor=pointer]
+      - main [ref=f1e96]:
+        - generic: "💡 Dica: Cole qualquer print com Ctrl + V, ou abra a Galeria de Diagramas no topo para carregar e desenhar!"
+        - generic [ref=f1e98]:
+          - button "−" [ref=f1e99] [cursor=pointer]
+          - generic [ref=f1e100]: 100%
+          - button "+" [ref=f1e101] [cursor=pointer]
+          - button "1:1" [ref=f1e102] [cursor=pointer]
+          - button "🎯 Enquadrar" [ref=f1e103] [cursor=pointer]
+      - complementary:
+        - generic:
+          - heading "📚 Referência Rápida para a Prova" [level=3]
+          - button "×"
+        - generic:
+          - button "Sinais & FSM"
+          - button "Fórmulas"
+          - button "Questões"
+          - button "IA Feedback"
+        - generic:
+          - generic:
+            - heading "Sinais de Controle (Monociclo)" [level=4]
+            - table:
+              - rowgroup:
+                - row "Instrução RegDst ALUSrc MemtoReg RegWrite MemRead MemWrite Branch ALUOp":
+                  - columnheader "Instrução"
+                  - columnheader "RegDst"
+                  - columnheader "ALUSrc"
+                  - columnheader "MemtoReg"
+                  - columnheader "RegWrite"
+                  - columnheader "MemRead"
+                  - columnheader "MemWrite"
+                  - columnheader "Branch"
+                  - columnheader "ALUOp"
+              - rowgroup:
+                - row "R-type 1 (rd) 0 0 (ALU) 1 0 0 0 10":
+                  - cell "R-type"
+                  - cell "1 (rd)"
+                  - cell "0"
+                  - cell "0 (ALU)"
+                  - cell "1"
+                  - cell "0"
+                  - cell "0"
+                  - cell "0"
+                  - cell "10"
+                - row "lw 0 (rt) 1 (ext) 1 (Mem) 1 1 0 0 00":
+                  - cell "lw"
+                  - cell "0 (rt)"
+                  - cell "1 (ext)"
+                  - cell "1 (Mem)"
+                  - cell "1"
+                  - cell "1"
+                  - cell "0"
+                  - cell "0"
+                  - cell "00"
+                - row "sw X 1 (ext) X 0 0 1 0 00":
+                  - cell "sw"
+                  - cell "X"
+                  - cell "1 (ext)"
+                  - cell "X"
+                  - cell "0"
+                  - cell "0"
+                  - cell "1"
+                  - cell "0"
+                  - cell "00"
+                - row "beq X 0 (reg) X 0 0 0 1 01":
+                  - cell "beq"
+                  - cell "X"
+                  - cell "0 (reg)"
+                  - cell "X"
+                  - cell "0"
+                  - cell "0"
+                  - cell "0"
+                  - cell "1"
+                  - cell "01"
+                - row "j X X X 0 0 0 0 XX":
+                  - cell "j"
+                  - cell "X"
+                  - cell "X"
+                  - cell "X"
+                  - cell "0"
+                  - cell "0"
+                  - cell "0"
+                  - cell "0"
+                  - cell "XX"
+            - heading "Os 5 Passos do Multiciclo" [level=4]
+            - list:
+              - listitem:
+                - text: "1. Busca (Fetch):"
+                - code: IR = Mem[PC]; PC = PC + 4;
+              - listitem:
+                - text: "2. Decodificação:"
+                - code: A = Reg[rs]; B = Reg[rt]; ALUOut = PC + (ext << 2);
+              - listitem:
+                - text: "3. Execução:"
+                - list:
+                  - listitem:
+                    - text: "R-type:"
+                    - code: ALUOut = A op B;
+                  - listitem:
+                    - text: "LW/SW:"
+                    - code: ALUOut = A + ext;
+                  - listitem:
+                    - text: "BEQ:"
+                    - code: if (A == B) PC = ALUOut;
+                    - text: (termina)
+                  - listitem:
+                    - text: "Jump:"
+                    - code: PC = PC[31:28] & (IR[25:0]<<2);
+                    - text: (termina)
+              - listitem:
+                - text: "4. Memória / Write-Back R:"
+                - list:
+                  - listitem:
+                    - text: "R-type:"
+                    - code: Reg[rd] = ALUOut;
+                    - text: (termina)
+                  - listitem:
+                    - text: "SW:"
+                    - code: Mem[ALUOut] = B;
+                    - text: (termina)
+                  - listitem:
+                    - text: "LW:"
+                    - code: MDR = Mem[ALUOut];
+              - listitem:
+                - text: "5. Write-Back LW:"
+                - code: Reg[rt] = MDR;
+                - text: (termina)
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - heading "📐 Galeria de Diagramas da Matéria" [level=2]
+          - paragraph: Escolha um diagrama em branco para completar ou um completo para estudar e desenhar por cima
+        - button "×"
+      - generic:
+        - generic:
+          - button "Todos"
+          - button "✏️ Em Branco (Para Completar)"
+          - button "📖 Completos (Referência)"
+          - button "⚡ 5 Passos Multiciclo"
+          - button "🎯 Exercícios dos Slides"
+          - generic: ➕ Adiciona ao quadro sem apagar nada
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic: Treino
+                - generic: MIPS
+              - generic: Monociclo em Branco (Sem Linhas de Controle)
+              - generic: Datapath completo com blocos e MUXes, mas sem fios de controle. Ideal para desenhar os sinais de cada instrução.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Treino
+                - generic: MIPS
+              - generic: Multiciclo em Branco (Bloco Operacional com MUXes)
+              - generic: Bloco operacional com IR, MDR, A, B, ALUOut e MUXes, pronto para traçar a propagação dos passos.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Treino
+                - generic: MIPS
+              - generic: Monociclo Básico (ADD, SUB, LW, SW)
+              - generic: Datapath simplificado sem branch e sem jump, para praticar as primeiras instruções.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Treino
+                - generic: MIPS
+              - generic: Monociclo Inicial (Apenas Banco de Registradores e ULA)
+              - generic: Blocos essenciais de operações Tipo R para entender o fluxo de dados entre registradores e ULA.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Treino
+                - generic: MIPS
+              - generic: Multiciclo Inicial (Registradores Internos)
+              - generic: Esquemático com os registradores temporários IR, MDR, A, B, ALUOut para praticar a lógica de multiplexação.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Completo
+                - generic: MIPS
+              - generic: Monociclo Completo com Controle
+              - generic: Caminho de dados monociclo com unidade de controle principal, ALU Control e todos os barramentos azuis.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Completo
+                - generic: MIPS
+              - generic: Monociclo Completo com Jump
+              - generic: Datapath completo com suporte à instrução incondicional Jump (formato J) e MUX do PC.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Tabela
+                - generic: MIPS
+              - generic: Tabela de Sinais de Controle (Monociclo)
+              - generic: Tabela oficial dos sinais RegDst, ALUSrc, MemtoReg, RegWrite, MemRead, MemWrite, Branch, ALUOp.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Completo
+                - generic: MIPS
+              - generic: Multiciclo Completo com Controle
+              - generic: Caminho de dados multiciclo completo com sinais IorD, ALUSelA, ALUSelB, PCSource, IRWrite, etc.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: FSM
+                - generic: MIPS
+              - generic: FSM Multiciclo Completa (10 Estados)
+              - generic: Máquina de estados finitos detalhada de 10 estados (0 a 9) com todas as condições de transição e sinais.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Exceções
+                - generic: MIPS
+              - generic: Multiciclo Completo com Exceções
+              - generic: Hardware estendido para suporte a exceções (EPC, Cause, registrador de status, vetor 0x80000180).
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: FSM
+                - generic: MIPS
+              - generic: FSM Completa com Exceções (Estados 10 e 11)
+              - generic: FSM estendida com os estados 10 (Instrução Indefinida) e 11 (Overflow Aritmético).
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Passo 1
+                - generic: MIPS
+              - generic: "Passo 1: Busca de Instrução (IR = Mem[PC]; PC = PC + 4)"
+              - generic: Destaque do caminho percorrido durante a busca da instrução e incremento do PC.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Passo 2
+                - generic: MIPS
+              - generic: "Passo 2: Decodificação e Branch Antecipado"
+              - generic: Leitura de registradores (A e B) e cálculo antecipado do endereço de salto na ULA.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Passo 3
+                - generic: MIPS
+              - generic: "Passo 3: Execução Tipo R (ALUOut = A op B)"
+              - generic: Cálculo da operação aritmética ou lógica na ULA para instruções Tipo R.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Passo 4
+                - generic: MIPS
+              - generic: "Passo 4: Write-Back Tipo R (Reg[rd] = ALUOut)"
+              - generic: Gravação do resultado da ULA no registrador de destino rd.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Passo 3
+                - generic: MIPS
+              - generic: "Passo 3: Memória (Cálculo de Endereço A + offset)"
+              - generic: Cálculo do endereço efetivo de memória para instruções LW e SW.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Passo 4
+                - generic: MIPS
+              - generic: "Passo 4: Leitura da Memória (MDR = Mem[ALUOut])"
+              - generic: Acesso de leitura à memória de dados para instrução LW.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Passo 5
+                - generic: MIPS
+              - generic: "Passo 5: Write-Back LW (Reg[rt] = MDR)"
+              - generic: "Conclusão do LW: gravação do dado da memória no registrador rt."
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Passo 4
+                - generic: MIPS
+              - generic: "Passo 4: Escrita na Memória SW (Mem[ALUOut] = B)"
+              - generic: Gravação do dado do registrador B na memória de dados (conclusão do SW).
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Passo 3
+                - generic: MIPS
+              - generic: "Passo 3: Decisão de Branch (if A == B then PC = ALUOut)"
+              - generic: Comparação de registradores na ULA e atualização condicional do PC.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Passo 3
+                - generic: MIPS
+              - generic: "Passo 3: Salto Incondicional Jump"
+              - generic: Atualização do PC com o endereço de 26 bits deslocado.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Ex 4.1
+                - generic: MIPS
+              - generic: "Exercício 4.1: Sinais e Recursos da Instrução AND"
+              - generic: Identificar sinais de controle e blocos ativos/inativos para a instrução AND Rd, Rs, Rt.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Ex 4.2
+                - generic: MIPS
+              - generic: "Exercício 4.2: Implementando Nova Instrução LWI Rt, Rd(Rs)"
+              - generic: Load Word com deslocamento em registrador. Quais blocos e sinais adicionar ao datapath?
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Ex 4.3
+                - generic: MIPS
+              - generic: "Exercício 4.3: Latências, Multiplicador e Speedup"
+              - generic: Calcular tempo de ciclo com e sem multiplicador e avaliar o ganho real de desempenho.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Ex 4.4
+                - generic: MIPS
+              - generic: "Exercício 4.4: Caminho Crítico e Tempo de Relógio"
+              - generic: Calcular o ciclo para processadores que só fazem fetch, branch relativo ou condicional.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Ex 5.8
+                - generic: MIPS
+              - generic: "Exercício 5.8: Adicionando Instrução JR $ra (Jump Register)"
+              - generic: Desenhar as modificações necessárias no caminho de dados para suportar PC = Reg[rs].
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Ex 5.11
+                - generic: MIPS
+              - generic: "Exercício 5.11 a 5.14: LWPI (Pós-Incremento) e SWAP"
+              - generic: Por que o Monociclo não suporta LWPI sem duplicar portas e como o Multiciclo resolve em 6 ciclos.
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Ex 5.29
+                - generic: MIPS
+              - generic: "Exercício 5.29: Falhas Presas (Stuck-at) no Multiciclo"
+              - generic: Efeito de sinais presos em 0 ou 1 (IRWrite=0, PCWrite=0, PCWriteCond=0, etc.).
+            - button "✏️ Carregar no Quadro"
+          - generic:
+            - generic:
+              - generic:
+                - generic: Ex 5.49
+                - generic: MIPS
+              - generic: "Exercício 5.49 e 5.50: Instrução ERET e Tratamento de Exceções"
+              - generic: Implementação do retorno de exceção PC = EPC no caminho de dados e FSM.
+            - button "✏️ Carregar no Quadro"
