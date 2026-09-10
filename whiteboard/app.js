@@ -35,6 +35,7 @@ let startY = 0;
 let elements = []; // { type: 'path'|'line'|'arrow'|'rect'|'mux'|'alu'|'text'|'image', ... }
 let undoStack = [];
 let redoStack = [];
+let pendingUndoState = null;
 const MAX_UNDO_STACK = 100;
 let currentPath = null;
 let drawStartState = null;
@@ -375,7 +376,17 @@ const btnCloseGallery = document.getElementById('btnCloseGallery');
 const galleryGrid = document.getElementById('galleryGrid');
 
 const btnSaveAI = document.getElementById('btnSaveAI');
+const btnSaveAIFocus = document.getElementById('btnSaveAIFocus');
 const btnExportPNG = document.getElementById('btnExportPNG');
+const btnExportFullPNG = document.getElementById('btnExportFullPNG');
+const btnExportJSON = document.getElementById('btnExportJSON');
+const importJsonInput = document.getElementById('importJsonInput');
+const exportDropdown = document.getElementById('exportDropdown');
+const btnExportMenu = document.getElementById('btnExportMenu');
+const btnGridToggle = document.getElementById('btnGridToggle');
+const btnShortcuts = document.getElementById('btnShortcuts');
+const shortcutsModal = document.getElementById('shortcutsModal');
+const btnCloseShortcuts = document.getElementById('btnCloseShortcuts');
 const btnClearCanvas = document.getElementById('btnClearCanvas');
 const syncBadge = document.getElementById('syncBadge');
 const syncText = document.getElementById('syncText');
@@ -392,6 +403,9 @@ const btnToggleSidebar = document.getElementById('btnToggleSidebar');
 const btnCloseSidebar = document.getElementById('btnCloseSidebar');
 const sidebarBackdrop = document.getElementById('sidebarBackdrop');
 const canvasHint = document.getElementById('canvasHint');
+
+// Grid state (dots, lines, none)
+let gridMode = localStorage.getItem('whiteboard_grid') || 'dots';
 
 // Collaboration DOM Elements
 const btnCollaborate = document.getElementById('btnCollaborate');
@@ -467,7 +481,18 @@ function canvasToScreen(cx, cy) {
 // Image cache for fast, flicker-free undo/redo
 const imageCache = new Map();
 
+function ensureElementIds() {
+  const seen = new Set();
+  for (const el of elements) {
+    if (!el.id || seen.has(el.id)) {
+      el.id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+    }
+    seen.add(el.id);
+  }
+}
+
 function serializeBoardState() {
+  ensureElementIds();
   return JSON.stringify(elements, (key, value) => {
     if (key === 'imgObj') return undefined;
     return value;
@@ -489,64 +514,104 @@ function updateUndoRedoUI() {
   }
 }
 
-// Push state to undo stack (with deduplication)
-function pushUndoState(stateStr) {
-  if (!stateStr) return;
-  // Prevent duplicate consecutive entries
-  if (undoStack.length > 0 && undoStack[undoStack.length - 1] === stateStr) {
-    return;
-  }
-  undoStack.push(stateStr);
-  if (undoStack.length > MAX_UNDO_STACK) undoStack.shift();
-  redoStack = [];
-  updateUndoRedoUI();
+// Each history entry contains only the changes made by this browser.
+function boardChanges(before, after) {
+  const old = new Map(before.map((el, index) => [el.id, { el, index }]));
+  const next = new Map(after.map((el, index) => [el.id, { el, index }]));
+  return [...new Set([...old.keys(), ...next.keys()])].flatMap(id => {
+    const a = old.get(id), b = next.get(id);
+    if (JSON.stringify(a?.el) === JSON.stringify(b?.el)) return [];
+    return [{ id, before: a?.el || null, after: b?.el || null,
+      beforeIndex: a?.index, afterIndex: b?.index }];
+  });
 }
 
-// Save state for Undo/Redo
+function applyBoardChanges(board, changes) {
+  const result = board.slice();
+  for (const change of changes) {
+    const index = result.findIndex(el => el.id === change.id);
+    if (change.after === null) {
+      if (index >= 0) result.splice(index, 1);
+    } else {
+      if (index >= 0) result.splice(index, 1);
+      const position = change.afterIndex ?? (index >= 0 ? index : result.length);
+      // History values must remain immutable when the restored element is edited.
+      result.splice(position, 0, JSON.parse(JSON.stringify(change.after)));
+    }
+  }
+  return result;
+}
+
+function pushUndoState(stateStr) {
+  pendingUndoState = stateStr;
+}
+
 function recordState() {
   pushUndoState(serializeBoardState());
   scheduleAutoSave();
 }
 
-function restoreBoardState(stateStr) {
-  if (!stateStr) return;
-  try {
-    elements = JSON.parse(stateStr);
+function commitLocalAction() {
+  if (pendingUndoState === null) return false;
+  const changes = boardChanges(JSON.parse(pendingUndoState), JSON.parse(serializeBoardState()));
+  pendingUndoState = null;
+  if (changes.length) {
+    undoStack.push(changes);
+    if (undoStack.length > MAX_UNDO_STACK) undoStack.shift();
+    redoStack = [];
+    sendWsMessage({ type: 'board_patch', changes });
+  }
+  updateUndoRedoUI();
+  return true;
+}
+
+function reverseChanges(changes) {
+  return changes.map(change => ({ id: change.id, before: change.after, after: change.before,
+    beforeIndex: change.afterIndex, afterIndex: change.beforeIndex }));
+}
+
+function travelHistory(from, to, label) {
+  if (isDrawing || isDraggingElement || from.length === 0) return;
+  const current = JSON.parse(serializeBoardState());
+  const changes = reverseChanges(from.pop()).filter(change => {
+    const el = current.find(el => el.id === change.id) || null;
+    // Preserve subsequent edits by another participant to the same element.
+    return JSON.stringify(el) === JSON.stringify(change.before);
+  });
+  if (changes.length) {
+    elements = applyBoardChanges(current, changes);
+    to.push(changes);
+    if (to.length > MAX_UNDO_STACK) to.shift();
     selectedElement = null;
-    isDraggingElement = false;
     rehydrateImages();
     render();
-  } catch (err) {
-    console.error('Erro ao restaurar estado do quadro:', err);
+    scheduleAutoSave();
+    sendWsMessage({ type: 'board_patch', changes });
   }
+  updateUndoRedoUI();
+  showSyncBadge(changes.length ? label : 'Ação já alterada por outro participante', 'saving');
 }
 
 function undo() {
-  if (undoStack.length === 0) return;
-  const currentState = serializeBoardState();
-  redoStack.push(currentState);
-  if (redoStack.length > MAX_UNDO_STACK) redoStack.shift();
-
-  const prevState = undoStack.pop();
-  restoreBoardState(prevState);
-  updateUndoRedoUI();
-  scheduleAutoSave();
-  broadcastBoardSync();
-  showSyncBadge('Ação desfeita (Undo)', 'saving');
+  travelHistory(undoStack, redoStack, 'Sua ação foi desfeita');
 }
 
 function redo() {
-  if (redoStack.length === 0) return;
-  const currentState = serializeBoardState();
-  undoStack.push(currentState);
-  if (undoStack.length > MAX_UNDO_STACK) undoStack.shift();
+  travelHistory(redoStack, undoStack, 'Sua ação foi refeita');
+}
 
-  const nextState = redoStack.pop();
-  restoreBoardState(nextState);
-  updateUndoRedoUI();
-  scheduleAutoSave();
-  broadcastBoardSync();
-  showSyncBadge('Ação refeita (Redo)', 'saving');
+// Remote changes also update the starting point of an ongoing gesture,
+// so they are never recorded as part of that local action.
+function receiveBoardChanges(changes) {
+  const rebase = state => state === null ? null : JSON.stringify(applyBoardChanges(JSON.parse(state), changes));
+  pendingUndoState = rebase(pendingUndoState);
+  drawStartState = rebase(drawStartState);
+  dragStartState = rebase(dragStartState);
+  eraseStartState = rebase(eraseStartState);
+  elements = applyBoardChanges(elements, changes);
+  if (selectedElement) selectedElement = elements.find(el => el.id === selectedElement.id) || null;
+  rehydrateImages();
+  render();
 }
 
 function rehydrateImages() {
@@ -575,6 +640,41 @@ function rehydrateImages() {
   });
 }
 
+function drawGrid(context, mode) {
+  const gridSize = 40;
+  const startX = Math.floor((-panX / zoom) / gridSize) * gridSize - gridSize;
+  const startY = Math.floor((-panY / zoom) / gridSize) * gridSize - gridSize;
+  const endX = startX + Math.ceil(width / zoom) + gridSize * 2;
+  const endY = startY + Math.ceil(height / zoom) + gridSize * 2;
+
+  context.save();
+  if (mode === 'dots') {
+    context.fillStyle = 'rgba(148, 163, 184, 0.35)';
+    const dotRadius = Math.max(0.8, 1.2 / Math.sqrt(zoom));
+    for (let x = startX; x <= endX; x += gridSize) {
+      for (let y = startY; y <= endY; y += gridSize) {
+        context.beginPath();
+        context.arc(x, y, dotRadius, 0, Math.PI * 2);
+        context.fill();
+      }
+    }
+  } else if (mode === 'lines') {
+    context.strokeStyle = 'rgba(226, 232, 240, 0.45)';
+    context.lineWidth = 1 / zoom;
+    context.beginPath();
+    for (let x = startX; x <= endX; x += gridSize) {
+      context.moveTo(x, startY);
+      context.lineTo(x, endY);
+    }
+    for (let y = startY; y <= endY; y += gridSize) {
+      context.moveTo(startX, y);
+      context.lineTo(endX, y);
+    }
+    context.stroke();
+  }
+  context.restore();
+}
+
 // Render Canvas
 function render() {
   ctx.save();
@@ -584,6 +684,11 @@ function render() {
   // Apply Pan & Zoom
   ctx.translate(panX, panY);
   ctx.scale(zoom, zoom);
+
+  // Render Background Grid
+  if (gridMode !== 'none') {
+    drawGrid(ctx, gridMode);
+  }
 
   // Render elements
   elements.forEach(el => drawElement(ctx, el));
@@ -1109,13 +1214,54 @@ function setupEventListeners() {
   if (btnUndo) btnUndo.addEventListener('click', undo);
   if (btnRedo) btnRedo.addEventListener('click', redo);
 
-  // Save for AI button
-  btnSaveAI.addEventListener('click', () => {
-    saveToAI(true);
+  // Save for AI buttons
+  if (btnSaveAI) {
+    btnSaveAI.addEventListener('click', () => saveToAI(true, false));
+  }
+  if (btnSaveAIFocus) {
+    btnSaveAIFocus.addEventListener('click', () => saveToAI(true, true));
+  }
+
+  // Export buttons
+  if (btnExportPNG) btnExportPNG.addEventListener('click', () => {
+    if (exportDropdown) exportDropdown.classList.remove('open');
+    exportLocalPNG();
+  });
+  if (btnExportFullPNG) btnExportFullPNG.addEventListener('click', () => {
+    if (exportDropdown) exportDropdown.classList.remove('open');
+    exportFullPNG();
+  });
+  if (btnExportJSON) btnExportJSON.addEventListener('click', () => {
+    if (exportDropdown) exportDropdown.classList.remove('open');
+    exportBoardJSON();
+  });
+  if (importJsonInput) importJsonInput.addEventListener('change', (e) => {
+    if (exportDropdown) exportDropdown.classList.remove('open');
+    if (e.target.files && e.target.files[0]) importBoardJSON(e.target.files[0]);
+    importJsonInput.value = '';
+  });
+  if (btnExportMenu) btnExportMenu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (exportDropdown) exportDropdown.classList.toggle('open');
+  });
+  window.addEventListener('click', () => {
+    if (exportDropdown) exportDropdown.classList.remove('open');
   });
 
-  // Export PNG locally
-  btnExportPNG.addEventListener('click', exportLocalPNG);
+  // Grid toggle button
+  if (btnGridToggle) {
+    btnGridToggle.addEventListener('click', toggleGrid);
+    const labels = { 'dots': 'Grade: Pontos', 'lines': 'Grade: Linhas', 'none': 'Grade: Nenhuma' };
+    const txt = btnGridToggle.querySelector('.btn-text');
+    if (txt) txt.textContent = labels[gridMode];
+  }
+
+  // Shortcuts modal
+  if (btnShortcuts) btnShortcuts.addEventListener('click', openShortcutsModal);
+  if (btnCloseShortcuts) btnCloseShortcuts.addEventListener('click', closeShortcutsModal);
+  if (shortcutsModal) shortcutsModal.addEventListener('click', (e) => {
+    if (e.target === shortcutsModal) closeShortcutsModal();
+  });
 
   // Instant Template Dropdown Selection (Loads immediately on change!)
   templateSelect.addEventListener('change', () => {
@@ -1383,16 +1529,51 @@ function handlePointerMove(e) {
     return;
   }
 
+function simplifyPolyline(points, tolerance = 0.8) {
+  if (!points || points.length <= 2) return points;
+  function getSqSegDist(p, p1, p2) {
+    let x = p1.x, y = p1.y, dx = p2.x - x, dy = p2.y - y;
+    if (dx !== 0 || dy !== 0) {
+      const t = ((p.x - x) * dx + (p.y - y) * dy) / (dx * dx + dy * dy);
+      if (t > 1) { x = p2.x; y = p2.y; }
+      else if (t > 0) { x += dx * t; y += dy * t; }
+    }
+    dx = p.x - x; dy = p.y - y;
+    return dx * dx + dy * dy;
+  }
+  function simplifyDPStep(pts, first, last, sqTol, simplified) {
+    let maxSqDist = sqTol, index = -1;
+    for (let i = first + 1; i < last; i++) {
+      const sqDist = getSqSegDist(pts[i], pts[first], pts[last]);
+      if (sqDist > maxSqDist) { index = i; maxSqDist = sqDist; }
+    }
+    if (index !== -1) {
+      if (index - first > 1) simplifyDPStep(pts, first, index, sqTol, simplified);
+      simplified.push(pts[index]);
+      if (last - index > 1) simplifyDPStep(pts, index, last, sqTol, simplified);
+    }
+  }
+  const sqTol = tolerance * tolerance;
+  const simplified = [points[0]];
+  simplifyDPStep(points, 0, points.length - 1, sqTol, simplified);
+  simplified.push(points[points.length - 1]);
+  return simplified;
+}
+
   if (currentPath) {
     if (currentPath.type === 'path') {
       const subEvents = (e.getCoalescedEvents && typeof e.getCoalescedEvents === 'function')
         ? e.getCoalescedEvents()
         : [e];
+      const minDistance = Math.max(1.0, 1.8 / zoom);
       for (const ev of subEvents) {
         const subMouseX = ev.clientX - rect.left;
         const subMouseY = ev.clientY - rect.top;
         const subPt = screenToCanvas(subMouseX, subMouseY);
-        currentPath.points.push({ x: subPt.x, y: subPt.y });
+        const lastPt = currentPath.points[currentPath.points.length - 1];
+        if (!lastPt || Math.hypot(subPt.x - lastPt.x, subPt.y - lastPt.y) >= minDistance) {
+          currentPath.points.push({ x: Math.round(subPt.x * 10) / 10, y: Math.round(subPt.y * 10) / 10 });
+        }
       }
       broadcastLiveStroke(currentPath);
     } else {
@@ -1451,6 +1632,11 @@ function handlePointerUp(e) {
     if (currentPath) {
       let isValid = false;
       if (currentPath.type === 'path') {
+        currentPath.points = simplifyPolyline(currentPath.points, 0.8);
+        currentPath.points.forEach(p => {
+          p.x = Math.round(p.x * 10) / 10;
+          p.y = Math.round(p.y * 10) / 10;
+        });
         if (currentPath.points.length === 1) {
           // Click dot: duplicate point with tiny offset so canvas renders round dot
           currentPath.points.push({
@@ -1910,7 +2096,28 @@ function handleClipboardPaste(e) {
 
 function addImageFromFile(file, posX, posY) {
   const reader = new FileReader();
-  reader.onload = (event) => {
+  reader.onload = async (event) => {
+    const rawDataUrl = event.target.result;
+    let finalSrc = rawDataUrl;
+
+    // Fast upload to backend to store clean URL instead of huge base64
+    try {
+      showSyncBadge('Enviando imagem...', 'saving');
+      const upRes = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: rawDataUrl })
+      });
+      if (upRes.ok) {
+        const upData = await upRes.json();
+        if (upData.url) {
+          finalSrc = upData.url;
+        }
+      }
+    } catch (err) {
+      console.warn('Upload offline, usando fallback local:', err);
+    }
+
     const img = new Image();
     img.onload = () => {
       let maxDim = Math.min(850, width * 0.8);
@@ -1927,12 +2134,13 @@ function addImageFromFile(file, posX, posY) {
 
       recordState();
       const el = {
+        id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
         type: 'image',
-        src: event.target.result,
-        x: x,
-        y: y,
-        width: w,
-        height: h,
+        src: finalSrc,
+        x: Math.round(x),
+        y: Math.round(y),
+        width: Math.round(w),
+        height: Math.round(h),
         imgObj: img
       };
       elements.push(el);
@@ -1940,15 +2148,17 @@ function addImageFromFile(file, posX, posY) {
       render();
       scheduleAutoSave();
       broadcastElementAdd({
+        id: el.id,
         type: 'image',
-        src: event.target.result,
-        x: x,
-        y: y,
-        width: w,
-        height: h
+        src: finalSrc,
+        x: el.x,
+        y: el.y,
+        width: el.width,
+        height: el.height
       });
+      showSyncBadge('Imagem pronta!', 'synced');
     };
-    img.src = event.target.result;
+    img.src = finalSrc;
   };
   reader.readAsDataURL(file);
 }
@@ -1977,47 +2187,54 @@ function scheduleAutoSave() {
   }, 600);
 }
 
-async function saveToAI(manual = false) {
+async function saveToAI(manual = false, focusMode = false) {
   if (autoSaveTimer) clearTimeout(autoSaveTimer);
-  showSyncBadge('Sincronizando com a IA...', 'saving');
+  showSyncBadge(focusMode ? 'Salvando foco...' : 'Sincronizando com IA...', 'saving');
 
   try {
     const exportCanvas = document.createElement('canvas');
     const expCtx = exportCanvas.getContext('2d');
 
-    const bounds = getElementsBounds() || { minX: 0, minY: 0, maxX: width, maxY: height, width, height };
-    const padding = 50;
-    const expW = Math.max(1200, bounds.width + padding * 2);
-    const expH = Math.max(800, bounds.height + padding * 2);
+    let expW, expH;
 
-    exportCanvas.width = expW;
-    exportCanvas.height = expH;
+    if (focusMode) {
+      // Focus Mode: Captures exactly what the user is seeing on screen right now
+      expW = Math.min(2048, Math.round(width));
+      expH = Math.min(1536, Math.round(height));
+      exportCanvas.width = expW;
+      exportCanvas.height = expH;
 
-    // Fill clean white background
-    expCtx.fillStyle = '#ffffff';
-    expCtx.fillRect(0, 0, expW, expH);
+      expCtx.fillStyle = '#ffffff';
+      expCtx.fillRect(0, 0, expW, expH);
 
-    // Subtle grid pattern
-    expCtx.strokeStyle = 'rgba(226, 232, 240, 0.6)';
-    expCtx.lineWidth = 1;
-    for (let x = 0; x < expW; x += 30) {
-      expCtx.beginPath();
-      expCtx.moveTo(x, 0);
-      expCtx.lineTo(x, expH);
-      expCtx.stroke();
+      expCtx.translate(panX, panY);
+      expCtx.scale(zoom, zoom);
+      elements.forEach(el => drawElement(expCtx, el));
+    } else {
+      // Full Board Mode: bounded, downscaled if large
+      const bounds = getElementsBounds() || { minX: 0, minY: 0, maxX: width, maxY: height, width, height };
+      const padding = 50;
+      const rawW = Math.max(800, bounds.width + padding * 2);
+      const rawH = Math.max(600, bounds.height + padding * 2);
+
+      // Clamp max dimensions to 2560x1600 so it NEVER becomes a 106MP decompression bomb
+      const MAX_W = 2560;
+      const MAX_H = 1600;
+      const scale = Math.min(MAX_W / rawW, MAX_H / rawH, 1.0);
+
+      expW = Math.round(rawW * scale);
+      expH = Math.round(rawH * scale);
+
+      exportCanvas.width = expW;
+      exportCanvas.height = expH;
+
+      expCtx.fillStyle = '#ffffff';
+      expCtx.fillRect(0, 0, expW, expH);
+
+      expCtx.scale(scale, scale);
+      expCtx.translate(-bounds.minX + padding, -bounds.minY + padding);
+      elements.forEach(el => drawElement(expCtx, el));
     }
-    for (let y = 0; y < expH; y += 30) {
-      expCtx.beginPath();
-      expCtx.moveTo(0, y);
-      expCtx.lineTo(expW, y);
-      expCtx.stroke();
-    }
-
-    // Translate to align content
-    expCtx.translate(-bounds.minX + padding, -bounds.minY + padding);
-
-    // Draw all elements
-    elements.forEach(el => drawElement(expCtx, el));
 
     const dataUrl = exportCanvas.toDataURL('image/png');
 
@@ -2040,7 +2257,7 @@ async function saveToAI(manual = false) {
     if (res.ok) {
       showSyncBadge('● Sincronizado com IA', 'synced');
       if (manual) {
-        showToast('✅ Quadro salvo e visível para a IA! Pode me chamar no chat.');
+        showToast(focusMode ? '🎯 Foco atual salvo para a IA!' : '✅ Quadro salvo e visível para a IA! Pode me chamar no chat.');
       }
     } else {
       showSyncBadge('Erro ao salvar', 'idle');
@@ -2122,9 +2339,112 @@ async function loadSavedBoard() {
 
 function exportLocalPNG() {
   const link = document.createElement('a');
-  link.download = `whiteboard_mips_${Date.now()}.png`;
+  link.download = `whiteboard_mips_tela_${Date.now()}.png`;
   link.href = canvas.toDataURL('image/png');
   link.click();
+  showToast('📥 Imagem da tela baixada com sucesso!');
+}
+
+function exportFullPNG() {
+  const bounds = getElementsBounds() || { minX: 0, minY: 0, maxX: width, maxY: height, width, height };
+  const padding = 50;
+  const rawW = Math.max(800, bounds.width + padding * 2);
+  const rawH = Math.max(600, bounds.height + padding * 2);
+  const scale = Math.min(3200 / rawW, 2400 / rawH, 1.0);
+
+  const expCanvas = document.createElement('canvas');
+  expCanvas.width = Math.round(rawW * scale);
+  expCanvas.height = Math.round(rawH * scale);
+  const expCtx = expCanvas.getContext('2d');
+
+  expCtx.fillStyle = '#ffffff';
+  expCtx.fillRect(0, 0, expCanvas.width, expCanvas.height);
+  expCtx.scale(scale, scale);
+  expCtx.translate(-bounds.minX + padding, -bounds.minY + padding);
+  elements.forEach(el => drawElement(expCtx, el));
+
+  const link = document.createElement('a');
+  link.download = `quadro_mips_completo_${Date.now()}.png`;
+  link.href = expCanvas.toDataURL('image/png');
+  link.click();
+  showToast('📥 Imagem completa baixada com sucesso!');
+}
+
+function exportBoardJSON() {
+  const serializableElements = elements.map(el => {
+    const copy = { ...el };
+    delete copy.imgObj;
+    return copy;
+  });
+  const data = JSON.stringify({
+    version: '2.0',
+    exportedAt: new Date().toISOString(),
+    zoom,
+    panX,
+    panY,
+    elements: serializableElements
+  }, null, 2);
+
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.download = `quadro_mips_backup_${new Date().toISOString().slice(0,10)}.json`;
+  a.href = url;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('💾 Backup do quadro baixado com sucesso!');
+}
+
+function importBoardJSON(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (data && data.elements && Array.isArray(data.elements)) {
+        recordState();
+        elements = data.elements;
+        ensureElementIds();
+        if (data.zoom) zoom = data.zoom;
+        if (data.panX !== undefined) panX = data.panX;
+        if (data.panY !== undefined) panY = data.panY;
+        rehydrateImages();
+        render();
+        scheduleAutoSave();
+        broadcastBoardSync();
+        showToast(`📂 Backup restaurado com sucesso! (${elements.length} elementos)`);
+      } else {
+        alert('Arquivo JSON inválido.');
+      }
+    } catch (err) {
+      alert('Erro ao carregar arquivo JSON: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function toggleGrid() {
+  if (gridMode === 'dots') gridMode = 'lines';
+  else if (gridMode === 'lines') gridMode = 'none';
+  else gridMode = 'dots';
+
+  localStorage.setItem('whiteboard_grid', gridMode);
+  if (btnGridToggle) {
+    const labels = { 'dots': 'Grade: Pontos', 'lines': 'Grade: Linhas', 'none': 'Grade: Nenhuma' };
+    const txt = btnGridToggle.querySelector('.btn-text');
+    if (txt) txt.textContent = labels[gridMode];
+  }
+  render();
+  const desc = gridMode === 'dots' ? 'Pontilhado' : gridMode === 'lines' ? 'Linhas' : 'Sem grade';
+  showToast(`⊞ Grade: ${desc}`);
+}
+
+function openShortcutsModal() {
+  if (shortcutsModal) shortcutsModal.classList.add('open');
+}
+
+function closeShortcutsModal() {
+  if (shortcutsModal) shortcutsModal.classList.remove('open');
 }
 
 async function fetchAIFeedback() {
@@ -2155,8 +2475,20 @@ function setupHotkeys() {
 
     if (e.key === 'Escape') {
       closeGalleryModal();
+      closeShortcutsModal();
       studySidebar.classList.add('closed');
       sidebarBackdrop.classList.remove('active');
+      if (exportDropdown) exportDropdown.classList.remove('open');
+    }
+
+    if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+      openShortcutsModal();
+      return;
+    }
+
+    if (e.shiftKey && (e.key === 'G' || e.key === 'g')) {
+      toggleGrid();
+      return;
     }
 
     if (e.code === 'Space') {
@@ -2182,11 +2514,18 @@ function setupHotkeys() {
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (selectedElement) {
         recordState();
+        const deletedId = selectedElement.id;
+        const deletedEl = { ...selectedElement };
+        delete deletedEl.imgObj;
         elements = elements.filter(el => el !== selectedElement);
         selectedElement = null;
         render();
         scheduleAutoSave();
-        broadcastBoardSync();
+        sendWsMessage({
+          type: 'board_patch',
+          changes: [{ id: deletedId, before: deletedEl, after: null }]
+        });
+        showToast('🗑️ Elemento excluído');
         return;
       }
     }
@@ -2196,7 +2535,7 @@ function setupHotkeys() {
       fitToScreen();
       return;
     }
-    if (key === 'g') {
+    if (key === 'g' && !e.shiftKey) {
       openGalleryModal();
       return;
     }
@@ -2308,6 +2647,10 @@ function handleWsMessage(msg) {
   switch (msg.type) {
     case 'init': {
       wsClientId = msg.clientId;
+      undoStack = [];
+      redoStack = [];
+      pendingUndoState = null;
+      updateUndoRedoUI();
       const count = msg.userCount || 1;
       updateCollabUI(count, true);
 
@@ -2372,11 +2715,17 @@ function handleWsMessage(msg) {
       break;
     }
 
+    case 'board_patch': {
+      peerLiveStrokes.delete(msg.clientId);
+      receiveBoardChanges(msg.changes || []);
+      break;
+    }
+
     case 'element_add': {
       if (msg.clientId === wsClientId) return;
       peerLiveStrokes.delete(msg.clientId);
       if (msg.element) {
-        elements.push(msg.element);
+        receiveBoardChanges([{ id: msg.element.id, after: msg.element }]);
         if (msg.element.type === 'image') {
           rehydrateImages();
         }
@@ -2389,7 +2738,7 @@ function handleWsMessage(msg) {
       if (msg.clientId === wsClientId) return;
       peerLiveStrokes.delete(msg.clientId);
       if (Array.isArray(msg.elements)) {
-        elements = msg.elements;
+        receiveBoardChanges(boardChanges(JSON.parse(serializeBoardState()), msg.elements));
         selectedElement = null;
         rehydrateImages();
         render();
@@ -2400,7 +2749,7 @@ function handleWsMessage(msg) {
     case 'board_clear': {
       if (msg.clientId === wsClientId) return;
       peerLiveStrokes.clear();
-      elements = [];
+      receiveBoardChanges(boardChanges(JSON.parse(serializeBoardState()), []));
       selectedElement = null;
       render();
       showToast('🧹 O quadro foi limpo por outro participante.');
@@ -2440,6 +2789,7 @@ function broadcastLiveStroke(pathEl) {
 }
 
 function broadcastElementAdd(el) {
+  if (commitLocalAction()) return;
   if (!el) return;
   const clean = { ...el };
   delete clean.imgObj;
@@ -2450,6 +2800,8 @@ function broadcastElementAdd(el) {
 }
 
 function broadcastBoardSync() {
+  if (commitLocalAction()) return;
+  ensureElementIds();
   const cleanElements = elements.map(el => {
     const copy = { ...el };
     delete copy.imgObj;
@@ -2462,6 +2814,7 @@ function broadcastBoardSync() {
 }
 
 function broadcastBoardClear() {
+  if (commitLocalAction()) return;
   sendWsMessage({
     type: 'board_clear'
   });

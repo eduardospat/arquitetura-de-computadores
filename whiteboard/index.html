@@ -38,6 +38,7 @@
       </div>
 
       <!-- Actions & AI Sync -->
+      <!-- Actions & AI Sync -->
       <div class="top-actions">
         <div id="syncBadge" class="sync-badge idle" title="Status de sincronização com o assistente de IA">
           <span class="badge-dot"></span>
@@ -53,11 +54,34 @@
         <button id="btnRedo" class="btn btn-secondary" title="Refazer ação desfeita (Ctrl + Y ou Ctrl + Shift + Z)" disabled>
           ↪️ <span class="btn-text">Refazer</span>
         </button>
-        <button id="btnSaveAI" class="btn btn-primary" title="Salva o quadro atual em alta resolução para que a IA possa analisar">
-          💾 <span class="btn-text">Salvar para IA</span>
+        <button id="btnGridToggle" class="btn btn-secondary" title="Alternar grade de fundo (Pontos / Linhas / Nenhuma)">
+          ⊞ <span class="btn-text">Grade: Pontos</span>
         </button>
-        <button id="btnExportPNG" class="btn btn-secondary" title="Exportar imagem PNG localmente">
-          📥 <span class="btn-text">Baixar PNG</span>
+        <div class="btn-group">
+          <button id="btnSaveAI" class="btn btn-primary" title="Salva o quadro completo otimizado para que a IA possa analisar (Ctrl + S)">
+            💾 <span class="btn-text">Salvar p/ IA</span>
+          </button>
+          <button id="btnSaveAIFocus" class="btn btn-primary btn-focus" title="Salva exatamente a visão/zoom atual da tela para a IA">
+            🎯 <span class="btn-text">Foco</span>
+          </button>
+        </div>
+        <div class="dropdown" id="exportDropdown">
+          <button id="btnExportMenu" class="btn btn-secondary" title="Opções de Exportação e Backup">
+            📥 <span class="btn-text">Exportar</span> ▾
+          </button>
+          <div class="dropdown-menu" id="exportMenuContent">
+            <button id="btnExportPNG" class="dropdown-item">🖼️ Baixar Imagem PNG (Visão Atual)</button>
+            <button id="btnExportFullPNG" class="dropdown-item">📐 Baixar Imagem PNG (Tudo)</button>
+            <div class="dropdown-divider"></div>
+            <button id="btnExportJSON" class="dropdown-item">💾 Fazer Backup do Quadro (JSON)</button>
+            <label class="dropdown-item file-label" style="cursor:pointer; margin:0;">
+              📂 Restaurar Backup (JSON)
+              <input type="file" id="importJsonInput" accept=".json" style="display:none;">
+            </label>
+          </div>
+        </div>
+        <button id="btnShortcuts" class="btn btn-icon" title="Ver todos os atalhos do teclado (?)">
+          ⌨️
         </button>
         <button id="btnToggleSidebar" class="btn btn-icon" title="Abrir/fechar aba de consultas rápidas e fórmulas">
           📖 <span class="btn-text">Fórmulas & FSM</span>
@@ -458,6 +482,54 @@
         <div class="collab-status-bar">
           <span class="collab-status-indicator" id="collabStatusIndicator">🟢</span>
           <span id="collabStatusText">Conectado ao servidor colaborativo · 1 participante</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Keyboard Shortcuts & Studio Guide Modal -->
+  <div id="shortcutsModal" class="modal-overlay">
+    <div class="modal-card" style="max-width: 680px;">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h2>⌨️ Atalhos de Teclado & Guia Rápido</h2>
+          <p>Produtividade máxima para desenhar datapaths, sinais e resolver listas</p>
+        </div>
+        <button id="btnCloseShortcuts" class="close-btn" title="Fechar">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 20px; overflow-y: auto;">
+        <div class="shortcuts-grid">
+          <div class="shortcut-group">
+            <h4 style="color:#60a5fa; margin-bottom:10px; font-size:12.5px;">✏️ Ferramentas de Desenho</h4>
+            <table class="shortcuts-table">
+              <tr><td><kbd>P</kbd></td><td>Caneta Livre (Stylus / Mouse)</td></tr>
+              <tr><td><kbd>H</kbd></td><td>Marca-texto / Destaque de Barramento</td></tr>
+              <tr><td><kbd>L</kbd></td><td>Linha Reta / Fio</td></tr>
+              <tr><td><kbd>A</kbd></td><td>Seta de Sinal / Barramento</td></tr>
+              <tr><td><kbd>R</kbd></td><td>Retângulo / Bloco Operacional</td></tr>
+              <tr><td><kbd>M</kbd></td><td>Multiplexador MUX</td></tr>
+              <tr><td><kbd>U</kbd></td><td>Símbolo de ULA / ALU</td></tr>
+              <tr><td><kbd>T</kbd></td><td>Texto / Equações</td></tr>
+              <tr><td><kbd>E</kbd></td><td>Borracha Circular Vetorial</td></tr>
+              <tr><td><kbd>S</kbd></td><td>Mover / Selecionar Elemento</td></tr>
+            </table>
+          </div>
+          <div class="shortcut-group">
+            <h4 style="color:#34d399; margin-bottom:10px; font-size:12.5px;">⚡ Navegação & Ações Rápidas</h4>
+            <table class="shortcuts-table">
+              <tr><td><kbd>Espaço</kbd> + arrastar</td><td>Mover pelo quadro (Pan)</td></tr>
+              <tr><td><kbd>Scroll</kbd></td><td>Zoom in / Zoom out focado no cursor</td></tr>
+              <tr><td><kbd>F</kbd></td><td>Enquadrar todo o conteúdo na tela</td></tr>
+              <tr><td><kbd>0</kbd></td><td>Zoom padrão 1:1 (100%)</td></tr>
+              <tr><td><kbd>G</kbd></td><td>Abrir Galeria de Diagramas da Matéria</td></tr>
+              <tr><td><kbd>Shift</kbd> + <kbd>G</kbd></td><td>Alternar Grade (Pontos / Linhas / Nenhuma)</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd></td><td>Desfazer última ação</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>Y</kbd></td><td>Refazer ação desfeita</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>V</kbd></td><td>Colar qualquer print direto da área de transferência</td></tr>
+              <tr><td><kbd>Del</kbd> / <kbd>Backspace</kbd></td><td>Excluir elemento selecionado</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>S</kbd></td><td>Salvar e sincronizar quadro para o Assistente IA</td></tr>
+            </table>
+          </div>
         </div>
       </div>
     </div>

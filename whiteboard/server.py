@@ -27,8 +27,10 @@ if not os.path.exists(os.path.join(BASE_DIR, "index.html")) and os.path.exists(o
     BASE_DIR = os.path.join(BASE_DIR, "whiteboard")
 REPO_DIR = os.path.dirname(BASE_DIR) if os.path.basename(BASE_DIR) == 'whiteboard' else BASE_DIR
 TEMPLATES_DIR = os.path.join(BASE_DIR, 'templates')
+UPLOADS_DIR = os.path.join(BASE_DIR, 'uploads')
 
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
+os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 # Curated catalog of all course diagrams
 TEMPLATES_CATALOG = [
@@ -352,20 +354,40 @@ def load_initial_elements():
             print(f"Aviso ao carregar current_board.json inicial: {e}")
 
 load_initial_elements()
+for element in current_board_elements:
+    element.setdefault('id', str(uuid.uuid4()))
+
+
+def apply_board_patch(changes):
+    """Apply only changes whose previous value still matches the shared board."""
+    result = []
+    for change in changes:
+        element_id = change.get('id')
+        if not element_id:
+            continue
+        index = next((i for i, el in enumerate(current_board_elements) if el.get('id') == element_id), None)
+        current = current_board_elements[index] if index is not None else None
+        after = change.get('after')
+        if current == change.get('before') and (after is None or after.get('id') == element_id):
+            if after is None:
+                if index is not None:
+                    current_board_elements.pop(index)
+            elif index is not None:
+                current_board_elements[index] = after
+            else:
+                position = change.get('afterIndex', len(current_board_elements))
+                current_board_elements.insert(position, after)
+        index = next((i for i, el in enumerate(current_board_elements) if el.get('id') == element_id), None)
+        result.append({'id': element_id, 'after': current_board_elements[index] if index is not None else None,
+                       'afterIndex': index})
+    return result
 
 def save_elements_to_disk():
-    """Save vector elements to current_board.json (does NOT create image prints)."""
+    """Save vector elements compactly to current_board.json (does NOT duplicate to repo root)."""
     try:
         current_json = os.path.join(BASE_DIR, 'current_board.json')
         with open(current_json, 'w', encoding='utf-8') as f:
-            json.dump({'elements': current_board_elements}, f, indent=2, ensure_ascii=False)
-
-        root_json = os.path.join(REPO_DIR, 'current_board.json')
-        try:
-            with open(root_json, 'w', encoding='utf-8') as f:
-                json.dump({'elements': current_board_elements}, f, indent=2, ensure_ascii=False)
-        except Exception:
-            pass
+            json.dump({'elements': current_board_elements}, f, ensure_ascii=False)
     except Exception as e:
         print(f"Erro ao persistir current_board.json: {e}")
 
@@ -483,6 +505,51 @@ try:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f'Erro ao salvar feedback: {e}')
 
+    @app.post("/api/upload")
+    async def api_upload_image(request: Request):
+        """Accepts base64 image data from paste or file input, writes to disk and returns clean URL."""
+        try:
+            payload = await request.json()
+            image_data = payload.get('image', '')
+            if not image_data.startswith('data:image'):
+                raise HTTPException(status_code=400, detail="Formato de imagem inválido.")
+
+            header, b64_str = image_data.split(',', 1)
+            ext = '.png'
+            if 'jpeg' in header or 'jpg' in header:
+                ext = '.jpg'
+            elif 'webp' in header:
+                ext = '.webp'
+
+            img_bytes = base64.b64decode(b64_str)
+            filename = f"pasted_{uuid.uuid4().hex[:12]}{ext}"
+            filepath = os.path.join(UPLOADS_DIR, filename)
+
+            w, h = 800, 600
+            try:
+                from PIL import Image
+                import io
+                with Image.open(io.BytesIO(img_bytes)) as im:
+                    w, h = im.size
+                    max_dim = 2048
+                    if w > max_dim or h > max_dim:
+                        scale = min(max_dim / w, max_dim / h)
+                        im = im.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+                        w, h = im.size
+                    im.save(filepath, optimize=True)
+            except Exception:
+                with open(filepath, 'wb') as f:
+                    f.write(img_bytes)
+
+            return {
+                'status': 'ok',
+                'url': f'/uploads/{filename}',
+                'width': w,
+                'height': h
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f'Erro ao fazer upload da imagem: {e}')
+
     @app.post("/api/save")
     async def api_save_board(request: Request):
         try:
@@ -492,33 +559,30 @@ try:
             timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
 
             # Process Base64 PNG image (only when explicitly requested)
-            if image_data.startswith('data:image/png;base64,'):
-                b64_str = image_data.split('data:image/png;base64,')[1]
+            if image_data.startswith('data:image'):
+                header, b64_str = image_data.split(',', 1)
                 img_bytes = base64.b64decode(b64_str)
 
                 current_png = os.path.join(BASE_DIR, 'current_board.png')
-                with open(current_png, 'wb') as f:
-                    f.write(img_bytes)
-
-                root_png = os.path.join(REPO_DIR, 'current_board.png')
                 try:
-                    with open(root_png, 'wb') as f:
-                        f.write(img_bytes)
+                    from PIL import Image
+                    import io
+                    with Image.open(io.BytesIO(img_bytes)) as im:
+                        w, h = im.size
+                        max_dim = 2560
+                        if w > max_dim or h > max_dim:
+                            scale = min(max_dim / w, max_dim / h)
+                            im = im.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+                        im.save(current_png, format='PNG', optimize=True)
                 except Exception:
-                    pass
+                    with open(current_png, 'wb') as f:
+                        f.write(img_bytes)
 
-            # Save current_board.json (vector elements)
+            # Save current_board.json (vector elements compactly)
             if state_data:
                 current_json = os.path.join(BASE_DIR, 'current_board.json')
                 with open(current_json, 'w', encoding='utf-8') as f:
-                    json.dump(state_data, f, indent=2, ensure_ascii=False)
-
-                root_json = os.path.join(REPO_DIR, 'current_board.json')
-                try:
-                    with open(root_json, 'w', encoding='utf-8') as f:
-                        json.dump(state_data, f, indent=2, ensure_ascii=False)
-                except Exception:
-                    pass
+                    json.dump(state_data, f, ensure_ascii=False)
 
                 new_elements = state_data.get('elements')
                 if new_elements is not None:
@@ -533,6 +597,31 @@ try:
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=f'Erro ao salvar quadro: {e}')
+
+    @app.get("/api/board/export")
+    async def api_board_export():
+        return {
+            'elements': current_board_elements,
+            'exported_at': datetime.now().isoformat()
+        }
+
+    @app.post("/api/board/import")
+    async def api_board_import(request: Request):
+        try:
+            payload = await request.json()
+            new_elements = payload.get('elements', [])
+            current_board_elements.clear()
+            current_board_elements.extend(new_elements)
+            for el in current_board_elements:
+                el.setdefault('id', str(uuid.uuid4()))
+            save_elements_to_disk()
+            await broadcast({
+                "type": "board_sync",
+                "elements": current_board_elements
+            })
+            return {'status': 'ok', 'count': len(current_board_elements)}
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
@@ -590,6 +679,11 @@ try:
                 elif msg_type == "stroke_live":
                     msg["clientId"] = client_id
                     await broadcast(msg, exclude=client_id)
+
+                elif msg_type == "board_patch":
+                    changes = apply_board_patch(msg.get('changes', []))
+                    schedule_save_elements()
+                    await broadcast({'type': 'board_patch', 'changes': changes, 'clientId': client_id})
 
                 elif msg_type == "element_add":
                     el = msg.get("element")

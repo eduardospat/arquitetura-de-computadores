@@ -1,9 +1,26 @@
+# Python bytecode and caches
 __pycache__/
 *.pyc
 *.pyo
-whiteboard/snapshots/*.png
-!whiteboard/snapshots/.gitkeep
-snapshots/*.png
+*.pyd
+
+# Binary tools and executables
 *.exe
 cloudflared.exe
 
+# Whiteboard state, exports, uploads and snapshots
+current_board.json
+current_board.png
+whiteboard/current_board.json
+whiteboard/current_board.png
+whiteboard/current_board_opt.jpg
+whiteboard/snapshots/*.png
+whiteboard/uploads/
+snapshots/
+scratch/
+
+# IDE, OS, and editors
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
