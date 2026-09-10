@@ -9,11 +9,21 @@ Repositório configurado para o estudo prático e aprofundado da disciplina de *
 Você tem um **quadro branco digital local** feito sob medida para desenhar caminhos de dados, colar esquemáticos, traçar sinais e fazer contas, com **sincronização visual direta comigo (seu assistente de IA)**!
 
 ### Como iniciar o Whiteboard:
-- **Opção 1 (Windows):** Dê um duplo clique no arquivo `start_whiteboard.bat`.
-- **Opção 2 (Terminal):**
-  ```powershell
-  python start_whiteboard.py
+- **No Linux / macOS:**
+  ```bash
+  chmod +x start_whiteboard.sh iniciar_tunel.sh
+  ./start_whiteboard.sh
   ```
+  *(Ou via terminal: `python3 start_whiteboard.py`)*
+- **No Windows:**
+  - Duplo-clique no arquivo `start_whiteboard.bat`
+  - Ou via PowerShell / Prompt:
+    ```powershell
+    python start_whiteboard.py
+    ```
+- **Compartilhamento Online (Túnel Cloudflare para Amigos):**
+  - **Linux / macOS:** `./iniciar_tunel.sh` (ou `python3 compartilhar.py`)
+  - **Windows:** Duplo-clique em `iniciar_tunel.bat` (ou `python compartilhar.py`)
 - O navegador abrirá automaticamente em `http://localhost:8080`.
 
 ### Principais Recursos do Whiteboard:

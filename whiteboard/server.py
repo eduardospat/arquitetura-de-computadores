@@ -780,7 +780,13 @@ def run_server(port=PORT, open_browser=True):
     print("=" * 68)
 
     if open_browser:
-        webbrowser.open(url_local)
+        try:
+            # Avoid attempting GUI browser launch in headless Linux / SSH / Docker environments
+            is_headless_linux = sys.platform.startswith('linux') and not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
+            if not is_headless_linux:
+                webbrowser.open(url_local)
+        except Exception:
+            pass
 
     if HAS_FASTAPI:
         import uvicorn

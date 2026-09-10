@@ -1,0 +1,5 @@
+# Dependências para o Whiteboard Interativo de Arquitetura de Computadores
+# Compatível com Linux, macOS e Windows (Python 3.8+)
+fastapi>=0.100.0
+uvicorn>=0.20.0
+websockets>=11.0

@@ -12,22 +12,46 @@ import re
 import time
 import socket
 
+import shutil
+import urllib.request
+import platform
+
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', line_buffering=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CLOUDFLARED = os.path.join(BASE_DIR, 'cloudflared.exe')
 
-import shutil
-import urllib.request
+IS_WINDOWS = sys.platform.startswith('win')
+IS_DARWIN = sys.platform == 'darwin'
+IS_LINUX = sys.platform.startswith('linux')
+
+BINARY_NAME = 'cloudflared.exe' if IS_WINDOWS else 'cloudflared'
+CLOUDFLARED = os.path.join(BASE_DIR, BINARY_NAME)
 
 def copy_to_clipboard(text):
     try:
-        p = subprocess.Popen('clip', stdin=subprocess.PIPE, shell=True)
-        p.communicate(input=text.encode('utf-8'))
-        return True
+        if IS_WINDOWS:
+            p = subprocess.Popen('clip', stdin=subprocess.PIPE, shell=True)
+            p.communicate(input=text.encode('utf-8'))
+            return True
+        elif IS_DARWIN:
+            p = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
+            p.communicate(input=text.encode('utf-8'))
+            return True
+        else:
+            # Linux: support wl-copy (Wayland), xclip, xsel
+            for cmd in [
+                ['wl-copy'],
+                ['xclip', '-selection', 'clipboard'],
+                ['xsel', '--clipboard', '--input']
+            ]:
+                if shutil.which(cmd[0]):
+                    p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+                    p.communicate(input=text.encode('utf-8'))
+                    return True
     except Exception:
-        return False
+        pass
+    return False
 
 def is_port_in_use(port=8080):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -35,18 +59,46 @@ def is_port_in_use(port=8080):
 
 def ensure_cloudflared():
     if os.path.exists(CLOUDFLARED):
+        if not IS_WINDOWS and not os.access(CLOUDFLARED, os.X_OK):
+            try:
+                os.chmod(CLOUDFLARED, 0o755)
+            except Exception:
+                pass
         return CLOUDFLARED
+
     which_cf = shutil.which('cloudflared')
     if which_cf:
         return which_cf
-    print("⏳ cloudflared.exe não encontrado. Baixando oficial da Cloudflare...")
-    url = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe'
+
+    print(f"⏳ {BINARY_NAME} não encontrado. Baixando binário oficial da Cloudflare para sua plataforma...")
+    machine = platform.machine().lower()
+
+    if IS_WINDOWS:
+        url = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe'
+    elif IS_DARWIN:
+        if 'arm' in machine or 'aarch64' in machine:
+            url = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-arm64'
+        else:
+            url = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-amd64'
+    else:
+        # Linux
+        if 'arm' in machine or 'aarch64' in machine:
+            url = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64'
+        elif 'armv7' in machine:
+            url = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm'
+        elif '386' in machine or '686' in machine:
+            url = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-386'
+        else:
+            url = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64'
+
     try:
         urllib.request.urlretrieve(url, CLOUDFLARED)
-        print("✅ cloudflared.exe baixado com sucesso!")
+        if not IS_WINDOWS:
+            os.chmod(CLOUDFLARED, 0o755)
+        print(f"✅ {BINARY_NAME} baixado com sucesso!")
         return CLOUDFLARED
     except Exception as e:
-        print(f"❌ Não foi possível baixar cloudflared automaticamente: {e}")
+        print(f"❌ Não foi possível baixar {BINARY_NAME} automaticamente: {e}")
         return None
 
 def main():
