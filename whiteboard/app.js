@@ -778,6 +778,59 @@ function render() {
   updateZoomIndicator();
 }
 
+/**
+ * Smooth Catmull-Rom Cardinal Spline
+ * Converts sampled points into smooth cubic Bézier segments that pass
+ * PRECISELY through every single point, eliminating corner-cutting and
+ * maintaining 100% fidelity to what was drawn.
+ */
+function drawSmoothSpline(context, pts) {
+  const n = pts.length;
+  if (n < 2) return;
+  if (n === 2) {
+    context.moveTo(pts[0].x, pts[0].y);
+    context.lineTo(pts[1].x, pts[1].y);
+    return;
+  }
+
+  // Gentle tension (0.15) provides natural curvature without overshooting or clipping
+  const k = 0.15;
+  context.moveTo(pts[0].x, pts[0].y);
+
+  // First segment
+  const cp1x = pts[0].x + (pts[1].x - pts[0].x) * 0.25;
+  const cp1y = pts[0].y + (pts[1].y - pts[0].y) * 0.25;
+  const cp2x = pts[1].x - (pts[2].x - pts[0].x) * k;
+  const cp2y = pts[1].y - (pts[2].y - pts[0].y) * k;
+  context.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, pts[1].x, pts[1].y);
+
+  // Middle segments
+  for (let i = 1; i < n - 2; i++) {
+    const p0 = pts[i - 1];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2];
+
+    const c1x = p1.x + (p2.x - p0.x) * k;
+    const c1y = p1.y + (p2.y - p0.y) * k;
+    const c2x = p2.x - (p3.x - p1.x) * k;
+    const c2y = p2.y - (p3.y - p1.y) * k;
+
+    context.bezierCurveTo(c1x, c1y, c2x, c2y, p2.x, p2.y);
+  }
+
+  // Last segment
+  const pPrev2 = pts[n - 3];
+  const pPrev = pts[n - 2];
+  const pLast = pts[n - 1];
+
+  const lastCp1x = pPrev.x + (pLast.x - pPrev2.x) * k;
+  const lastCp1y = pPrev.y + (pLast.y - pPrev2.y) * k;
+  const lastCp2x = pLast.x - (pLast.x - pPrev.x) * 0.25;
+  const lastCp2y = pLast.y - (pLast.y - pPrev.y) * 0.25;
+  context.bezierCurveTo(lastCp1x, lastCp1y, lastCp2x, lastCp2y, pLast.x, pLast.y);
+}
+
 function drawElement(context, el) {
   context.save();
 
@@ -812,15 +865,9 @@ function drawElement(context, el) {
       context.lineTo(pts[1].x, pts[1].y);
       context.stroke();
     } else {
-      // Midpoint Quadratic Bézier Spline for silky smooth, natural curves
+      // Catmull-Rom spline: smooth curve that touches every point faithfully
       context.beginPath();
-      context.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length - 1; i++) {
-        const xc = (pts[i].x + pts[i + 1].x) / 2;
-        const yc = (pts[i].y + pts[i + 1].y) / 2;
-        context.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
-      }
-      context.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+      drawSmoothSpline(context, pts);
       context.stroke();
     }
   }
@@ -1815,10 +1862,10 @@ const strokeSmoother = {
     const dy = rawPt.y - this.lastSmoothed.y;
     const dist = Math.hypot(dx, dy);
 
-    // Dynamic smoothing factor:
-    // Small tremors (dist < 4px): alpha ~ 0.28 to strongly dampen mouse wobble
-    // Fast strokes (dist > 18px): alpha up to 0.82 to eliminate trailing lag
-    const alpha = Math.min(0.82, Math.max(0.28, dist / 22));
+    // High fidelity stroke smoothing:
+    // Only dampens microscopic jitter (< 2px) while following the cursor immediately
+    // with 0 perceived lag (alpha reaches 1.0 for strokes >= 4px).
+    const alpha = Math.min(1.0, Math.max(0.78, dist / 4));
     const sx = this.lastSmoothed.x + dx * alpha;
     const sy = this.lastSmoothed.y + dy * alpha;
     this.lastSmoothed = { x: sx, y: sy };
@@ -1865,33 +1912,6 @@ function simplifyPolyline(points, tolerance = 0.6) {
   return simplified;
 }
 
-/**
- * Chaikin Corner-Cutting Subdivision
- * Softens sharp, jagged corners produced by discrete mouse polling.
- */
-function smoothPolylineChaikin(points, iterations = 1) {
-  if (!points || points.length < 3) return points;
-  let pts = points;
-  for (let it = 0; it < iterations; it++) {
-    if (pts.length < 3) break;
-    const smoothed = [pts[0]];
-    for (let i = 0; i < pts.length - 1; i++) {
-      const p0 = pts[i];
-      const p1 = pts[i + 1];
-      smoothed.push({
-        x: 0.75 * p0.x + 0.25 * p1.x,
-        y: 0.75 * p0.y + 0.25 * p1.y
-      });
-      smoothed.push({
-        x: 0.25 * p0.x + 0.75 * p1.x,
-        y: 0.25 * p0.y + 0.75 * p1.y
-      });
-    }
-    smoothed.push(pts[pts.length - 1]);
-    pts = smoothed;
-  }
-  return pts;
-}
 
 // Pointer event handlers
 function handlePointerDown(e) {
@@ -2212,12 +2232,8 @@ function handlePointerUp(e) {
           }
         }
 
-        // Apply Chaikin corner-softening subdivision to round harsh angular mouse turns
-        if (currentPath.points.length >= 4) {
-          currentPath.points = smoothPolylineChaikin(currentPath.points, 1);
-        }
-        // Simplify slightly to eliminate redundant micro-segments while preserving smoothed curve
-        currentPath.points = simplifyPolyline(currentPath.points, 0.5);
+        // Gentle simplification to remove micro-collinear duplicates without altering curves or corners
+        currentPath.points = simplifyPolyline(currentPath.points, 0.25);
         currentPath.points.forEach(p => {
           p.x = Math.round(p.x * 10) / 10;
           p.y = Math.round(p.y * 10) / 10;
