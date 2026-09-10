@@ -359,27 +359,30 @@ for element in current_board_elements:
 
 
 def apply_board_patch(changes):
-    """Apply only changes whose previous value still matches the shared board."""
+    """Apply board changes (create, update, delete) to the canonical shared board elements."""
     result = []
     for change in changes:
         element_id = change.get('id')
         if not element_id:
             continue
         index = next((i for i, el in enumerate(current_board_elements) if el.get('id') == element_id), None)
-        current = current_board_elements[index] if index is not None else None
         after = change.get('after')
-        if current == change.get('before') and (after is None or after.get('id') == element_id):
-            if after is None:
-                if index is not None:
-                    current_board_elements.pop(index)
-            elif index is not None:
+        if after is None:
+            if index is not None:
+                current_board_elements.pop(index)
+            result.append({'id': element_id, 'after': None, 'afterIndex': None})
+        else:
+            if isinstance(after, dict) and after.get('id') != element_id:
+                after['id'] = element_id
+            if index is not None:
                 current_board_elements[index] = after
+                result.append({'id': element_id, 'after': after, 'afterIndex': index})
             else:
-                position = change.get('afterIndex', len(current_board_elements))
+                position = change.get('afterIndex')
+                if position is None or position < 0 or position > len(current_board_elements):
+                    position = len(current_board_elements)
                 current_board_elements.insert(position, after)
-        index = next((i for i, el in enumerate(current_board_elements) if el.get('id') == element_id), None)
-        result.append({'id': element_id, 'after': current_board_elements[index] if index is not None else None,
-                       'afterIndex': index})
+                result.append({'id': element_id, 'after': after, 'afterIndex': position})
     return result
 
 def save_elements_to_disk():
