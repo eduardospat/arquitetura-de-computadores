@@ -26,7 +26,7 @@ let spacePressed = false;
 // Drawing State
 let currentTool = 'pen';
 let currentColor = '#1e293b';
-let currentSize = 2;
+let currentSize = parseFloat(localStorage.getItem('whiteboard_stroke_size')) || 2.5;
 let isDrawing = false;
 let startX = 0;
 let startY = 0;
@@ -402,6 +402,43 @@ const studySidebar = document.getElementById('studySidebar');
 const btnToggleSidebar = document.getElementById('btnToggleSidebar');
 const btnCloseSidebar = document.getElementById('btnCloseSidebar');
 const sidebarBackdrop = document.getElementById('sidebarBackdrop');
+const strokeSizeSlider = document.getElementById('strokeSizeSlider');
+const strokeSizeLabel = document.getElementById('strokeSizeLabel');
+const strokePreviewDot = document.getElementById('strokePreviewDot');
+
+function setStrokeSize(size, updateSlider = true) {
+  const parsed = parseFloat(size);
+  if (isNaN(parsed) || parsed <= 0) return;
+  currentSize = Math.max(0.5, Math.min(36, parsed));
+  localStorage.setItem('whiteboard_stroke_size', currentSize.toString());
+
+  if (updateSlider && strokeSizeSlider) {
+    strokeSizeSlider.value = currentSize;
+  }
+  if (strokeSizeLabel) {
+    strokeSizeLabel.textContent = `${currentSize} px`;
+  }
+  updateStrokePreview();
+  updateEraserCursorSize();
+
+  document.querySelectorAll('.size-chip').forEach(chip => {
+    if (parseFloat(chip.dataset.size) === currentSize) {
+      chip.classList.add('active');
+    } else {
+      chip.classList.remove('active');
+    }
+  });
+}
+
+function updateStrokePreview() {
+  if (strokePreviewDot) {
+    const d = Math.min(14, Math.max(2, Math.round(currentSize)));
+    strokePreviewDot.style.width = `${d}px`;
+    strokePreviewDot.style.height = `${d}px`;
+    strokePreviewDot.style.backgroundColor = currentColor;
+  }
+}
+
 const canvasHint = document.getElementById('canvasHint');
 
 // Grid state (dots, lines, none)
@@ -429,6 +466,7 @@ window.addEventListener('load', () => {
   loadTemplateOptions(); // fetch dynamic from server if available
   loadSavedBoard();
   setupEventListeners();
+  setStrokeSize(currentSize, true);
   setupHotkeys();
   updateUndoRedoUI();
   setupCollabUI();
@@ -724,11 +762,11 @@ function drawElement(context, el) {
   context.save();
 
   if (el.type === 'path') {
-    if (!el.points || el.points.length < 2) {
+    if (!el.points || el.points.length === 0) {
       context.restore();
       return;
     }
-    context.beginPath();
+    const pts = el.points;
     context.strokeStyle = el.color;
     context.lineWidth = el.size;
     context.lineCap = 'round';
@@ -741,11 +779,30 @@ function drawElement(context, el) {
       context.globalAlpha = 1.0;
     }
 
-    context.moveTo(el.points[0].x, el.points[0].y);
-    for (let i = 1; i < el.points.length; i++) {
-      context.lineTo(el.points[i].x, el.points[i].y);
+    if (pts.length === 1) {
+      // Single click / dot
+      context.beginPath();
+      context.fillStyle = el.color;
+      const dotRadius = Math.max(0.75, (el.tool === 'highlighter' ? el.size * 1.4 : el.size / 2));
+      context.arc(pts[0].x, pts[0].y, dotRadius, 0, Math.PI * 2);
+      context.fill();
+    } else if (pts.length === 2) {
+      context.beginPath();
+      context.moveTo(pts[0].x, pts[0].y);
+      context.lineTo(pts[1].x, pts[1].y);
+      context.stroke();
+    } else {
+      // Midpoint Quadratic Bézier Spline for silky smooth, natural curves
+      context.beginPath();
+      context.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length - 1; i++) {
+        const xc = (pts[i].x + pts[i + 1].x) / 2;
+        const yc = (pts[i].y + pts[i + 1].y) / 2;
+        context.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
+      }
+      context.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+      context.stroke();
     }
-    context.stroke();
   }
   else if (el.type === 'line') {
     context.beginPath();
@@ -849,8 +906,9 @@ function drawElement(context, el) {
     context.fillText('ULA / ALU', rx + rw * 0.45, ry + rh / 2);
   }
   else if (el.type === 'text') {
+    const fontSize = Math.round(Math.max(12, Math.min(48, (el.size || 2.5) * 2 + 12)));
     context.fillStyle = el.color;
-    context.font = `${el.size * 4 + 11}px 'Fira Code', monospace`;
+    context.font = `${fontSize}px 'Fira Code', monospace`;
     context.textBaseline = 'top';
     context.fillText(el.text, el.x, el.y);
   }
@@ -888,7 +946,7 @@ function getElementBoundingBox(el) {
     const y = Math.min(el.y1, el.y2);
     return { x, y, width: Math.abs(el.x2 - el.x1), height: Math.abs(el.y2 - el.y1) };
   } else if (el.type === 'text') {
-    const fontSize = el.size * 4 + 11;
+    const fontSize = Math.round(Math.max(12, Math.min(48, (el.size || 2.5) * 2 + 12)));
     const estWidth = el.text.length * (fontSize * 0.6);
     return { x: el.x, y: el.y, width: estWidth, height: fontSize * 1.3 };
   }
@@ -1176,16 +1234,26 @@ function setupEventListeners() {
       document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
       dot.classList.add('active');
       currentColor = dot.dataset.color;
+      updateStrokePreview();
     });
   });
 
-  // Size selection
-  document.querySelectorAll('.size-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      currentSize = parseInt(btn.dataset.size, 10);
-      updateEraserCursorSize();
+  // Stroke size slider & quick preset chips
+  if (strokeSizeSlider) {
+    strokeSizeSlider.addEventListener('input', (e) => {
+      setStrokeSize(e.target.value, false);
+    });
+    strokeSizeSlider.addEventListener('change', (e) => {
+      setStrokeSize(e.target.value, true);
+    });
+  }
+
+  document.querySelectorAll('.size-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const sz = parseFloat(chip.dataset.size);
+      if (!isNaN(sz)) {
+        setStrokeSize(sz, true);
+      }
     });
   });
 
@@ -1365,6 +1433,107 @@ function setupEventListeners() {
   }
 }
 
+// ==================== Stroke Smoothing & Geometry Algorithms ====================
+
+/**
+ * Online Real-Time Stream Stabilizer
+ * Uses adaptive Exponential Moving Average (EMA) to eliminate high-frequency mouse jitter
+ * while remaining snappy and responsive on fast sweeps.
+ */
+const strokeSmoother = {
+  active: false,
+  lastSmoothed: null,
+  reset(initialPt) {
+    this.active = true;
+    this.lastSmoothed = initialPt ? { x: initialPt.x, y: initialPt.y } : null;
+  },
+  smooth(rawPt) {
+    if (!this.active || !this.lastSmoothed) {
+      this.reset(rawPt);
+      return { x: rawPt.x, y: rawPt.y };
+    }
+    const dx = rawPt.x - this.lastSmoothed.x;
+    const dy = rawPt.y - this.lastSmoothed.y;
+    const dist = Math.hypot(dx, dy);
+
+    // Dynamic smoothing factor:
+    // Small tremors (dist < 4px): alpha ~ 0.28 to strongly dampen mouse wobble
+    // Fast strokes (dist > 18px): alpha up to 0.82 to eliminate trailing lag
+    const alpha = Math.min(0.82, Math.max(0.28, dist / 22));
+    const sx = this.lastSmoothed.x + dx * alpha;
+    const sy = this.lastSmoothed.y + dy * alpha;
+    this.lastSmoothed = { x: sx, y: sy };
+    return { x: sx, y: sy };
+  },
+  finish() {
+    this.active = false;
+    this.lastSmoothed = null;
+  }
+};
+
+/**
+ * Ramer-Douglas-Peucker Polyline Simplification
+ * Keeps the file size compact and removes redundant micro-points without losing shape fidelity.
+ */
+function simplifyPolyline(points, tolerance = 0.6) {
+  if (!points || points.length <= 2) return points;
+  function getSqSegDist(p, p1, p2) {
+    let x = p1.x, y = p1.y, dx = p2.x - x, dy = p2.y - y;
+    if (dx !== 0 || dy !== 0) {
+      const t = ((p.x - x) * dx + (p.y - y) * dy) / (dx * dx + dy * dy);
+      if (t > 1) { x = p2.x; y = p2.y; }
+      else if (t > 0) { x += dx * t; y += dy * t; }
+    }
+    dx = p.x - x; dy = p.y - y;
+    return dx * dx + dy * dy;
+  }
+  function simplifyDPStep(pts, first, last, sqTol, simplified) {
+    let maxSqDist = sqTol, index = -1;
+    for (let i = first + 1; i < last; i++) {
+      const sqDist = getSqSegDist(pts[i], pts[first], pts[last]);
+      if (sqDist > maxSqDist) { index = i; maxSqDist = sqDist; }
+    }
+    if (index !== -1) {
+      if (index - first > 1) simplifyDPStep(pts, first, index, sqTol, simplified);
+      simplified.push(pts[index]);
+      if (last - index > 1) simplifyDPStep(pts, index, last, sqTol, simplified);
+    }
+  }
+  const sqTol = tolerance * tolerance;
+  const simplified = [points[0]];
+  simplifyDPStep(points, 0, points.length - 1, sqTol, simplified);
+  simplified.push(points[points.length - 1]);
+  return simplified;
+}
+
+/**
+ * Chaikin Corner-Cutting Subdivision
+ * Softens sharp, jagged corners produced by discrete mouse polling.
+ */
+function smoothPolylineChaikin(points, iterations = 1) {
+  if (!points || points.length < 3) return points;
+  let pts = points;
+  for (let it = 0; it < iterations; it++) {
+    if (pts.length < 3) break;
+    const smoothed = [pts[0]];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i];
+      const p1 = pts[i + 1];
+      smoothed.push({
+        x: 0.75 * p0.x + 0.25 * p1.x,
+        y: 0.75 * p0.y + 0.25 * p1.y
+      });
+      smoothed.push({
+        x: 0.25 * p0.x + 0.75 * p1.x,
+        y: 0.25 * p0.y + 0.75 * p1.y
+      });
+    }
+    smoothed.push(pts[pts.length - 1]);
+    pts = smoothed;
+  }
+  return pts;
+}
+
 // Pointer event handlers
 function handlePointerDown(e) {
   // Captura o ponteiro e previne comportamentos de arrasto/gestos nativos do Windows Ink / touch
@@ -1440,6 +1609,7 @@ function handlePointerDown(e) {
   drawStartState = serializeBoardState();
 
   if (currentTool === 'pen' || currentTool === 'highlighter') {
+    strokeSmoother.reset(pt);
     currentPath = {
       type: 'path',
       tool: currentTool,
@@ -1529,50 +1699,23 @@ function handlePointerMove(e) {
     return;
   }
 
-function simplifyPolyline(points, tolerance = 0.8) {
-  if (!points || points.length <= 2) return points;
-  function getSqSegDist(p, p1, p2) {
-    let x = p1.x, y = p1.y, dx = p2.x - x, dy = p2.y - y;
-    if (dx !== 0 || dy !== 0) {
-      const t = ((p.x - x) * dx + (p.y - y) * dy) / (dx * dx + dy * dy);
-      if (t > 1) { x = p2.x; y = p2.y; }
-      else if (t > 0) { x += dx * t; y += dy * t; }
-    }
-    dx = p.x - x; dy = p.y - y;
-    return dx * dx + dy * dy;
-  }
-  function simplifyDPStep(pts, first, last, sqTol, simplified) {
-    let maxSqDist = sqTol, index = -1;
-    for (let i = first + 1; i < last; i++) {
-      const sqDist = getSqSegDist(pts[i], pts[first], pts[last]);
-      if (sqDist > maxSqDist) { index = i; maxSqDist = sqDist; }
-    }
-    if (index !== -1) {
-      if (index - first > 1) simplifyDPStep(pts, first, index, sqTol, simplified);
-      simplified.push(pts[index]);
-      if (last - index > 1) simplifyDPStep(pts, index, last, sqTol, simplified);
-    }
-  }
-  const sqTol = tolerance * tolerance;
-  const simplified = [points[0]];
-  simplifyDPStep(points, 0, points.length - 1, sqTol, simplified);
-  simplified.push(points[points.length - 1]);
-  return simplified;
-}
-
   if (currentPath) {
     if (currentPath.type === 'path') {
       const subEvents = (e.getCoalescedEvents && typeof e.getCoalescedEvents === 'function')
         ? e.getCoalescedEvents()
         : [e];
-      const minDistance = Math.max(1.0, 1.8 / zoom);
+      const minDistance = Math.max(1.0, 1.6 / zoom);
       for (const ev of subEvents) {
         const subMouseX = ev.clientX - rect.left;
         const subMouseY = ev.clientY - rect.top;
-        const subPt = screenToCanvas(subMouseX, subMouseY);
+        const rawPt = screenToCanvas(subMouseX, subMouseY);
+        const smoothedPt = strokeSmoother.smooth(rawPt);
         const lastPt = currentPath.points[currentPath.points.length - 1];
-        if (!lastPt || Math.hypot(subPt.x - lastPt.x, subPt.y - lastPt.y) >= minDistance) {
-          currentPath.points.push({ x: Math.round(subPt.x * 10) / 10, y: Math.round(subPt.y * 10) / 10 });
+        if (!lastPt || Math.hypot(smoothedPt.x - lastPt.x, smoothedPt.y - lastPt.y) >= minDistance) {
+          currentPath.points.push({
+            x: Math.round(smoothedPt.x * 10) / 10,
+            y: Math.round(smoothedPt.y * 10) / 10
+          });
         }
       }
       broadcastLiveStroke(currentPath);
@@ -1632,19 +1775,35 @@ function handlePointerUp(e) {
     if (currentPath) {
       let isValid = false;
       if (currentPath.type === 'path') {
-        currentPath.points = simplifyPolyline(currentPath.points, 0.8);
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = (e ? e.clientX : 0) - rect.left;
+        const mouseY = (e ? e.clientY : 0) - rect.top;
+        const finalRawPt = screenToCanvas(mouseX, mouseY);
+        strokeSmoother.finish();
+
+        // Ensure final point is accurately represented
+        if (currentPath.points.length > 1) {
+          const lastPt = currentPath.points[currentPath.points.length - 1];
+          if (Math.hypot(finalRawPt.x - lastPt.x, finalRawPt.y - lastPt.y) >= 1.5) {
+            currentPath.points.push({
+              x: Math.round(finalRawPt.x * 10) / 10,
+              y: Math.round(finalRawPt.y * 10) / 10
+            });
+          }
+        }
+
+        // Apply Chaikin corner-softening subdivision to round harsh angular mouse turns
+        if (currentPath.points.length >= 4) {
+          currentPath.points = smoothPolylineChaikin(currentPath.points, 1);
+        }
+        // Simplify slightly to eliminate redundant micro-segments while preserving smoothed curve
+        currentPath.points = simplifyPolyline(currentPath.points, 0.5);
         currentPath.points.forEach(p => {
           p.x = Math.round(p.x * 10) / 10;
           p.y = Math.round(p.y * 10) / 10;
         });
-        if (currentPath.points.length === 1) {
-          // Click dot: duplicate point with tiny offset so canvas renders round dot
-          currentPath.points.push({
-            x: currentPath.points[0].x + 0.1,
-            y: currentPath.points[0].y + 0.1
-          });
-        }
-        isValid = currentPath.points.length >= 2;
+
+        isValid = currentPath.points.length >= 1;
       } else {
         const dist = Math.hypot(currentPath.x2 - currentPath.x1, currentPath.y2 - currentPath.y1);
         isValid = dist >= 3;
@@ -1714,13 +1873,7 @@ let eraseModified = false;
 const eraserCursor = document.getElementById('eraserCursor');
 
 function getEraserRadius() {
-  switch (currentSize) {
-    case 2: return 12;
-    case 4: return 22;
-    case 8: return 38;
-    case 16: return 65;
-    default: return Math.max(8, currentSize * 4);
-  }
+  return Math.round(Math.max(10, Math.min(80, currentSize * 2.2 + 8)));
 }
 
 function updateEraserCursorPos(screenX, screenY) {
@@ -2024,7 +2177,8 @@ function promptAddText(screenX, screenY, canvasX, canvasY) {
   input.style.position = 'absolute';
   input.style.left = `${screenX + rect.left}px`;
   input.style.top = `${screenY + rect.top}px`;
-  input.style.fontSize = `${currentSize * 4 + 14}px`;
+  const fontSize = Math.round(Math.max(12, Math.min(48, currentSize * 2 + 12)));
+  input.style.fontSize = `${fontSize}px`;
   input.style.color = currentColor;
   input.style.background = 'rgba(255, 255, 255, 0.96)';
   input.style.border = '2px solid #3b82f6';

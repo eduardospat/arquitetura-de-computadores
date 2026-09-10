@@ -158,12 +158,25 @@
           <div class="color-dot" data-color="#06b6d4" style="background:#06b6d4;" title="Ciano"></div>
         </div>
 
-        <!-- Stroke Width -->
-        <div class="size-selector">
-          <button class="size-btn active" data-size="2" title="Fino">●</button>
-          <button class="size-btn" data-size="4" title="Médio">●</button>
-          <button class="size-btn" data-size="8" title="Grosso">●</button>
-          <button class="size-btn" data-size="16" title="Largo">●</button>
+        <!-- Stroke Width Slider & Presets -->
+        <div class="stroke-size-box">
+          <div class="stroke-size-header">
+            <span class="stroke-size-label">ESPESSURA</span>
+            <span id="strokeSizeLabel" class="stroke-size-value">2.5 px</span>
+          </div>
+          <div class="stroke-slider-container">
+            <input type="range" id="strokeSizeSlider" min="0.5" max="36" step="0.5" value="2.5" title="Ajustar grossura da caneta (0.5px a 36px)">
+            <div class="stroke-preview-circle-wrap" title="Prévia real da espessura">
+              <div id="strokePreviewDot" class="stroke-preview-dot"></div>
+            </div>
+          </div>
+          <div class="stroke-quick-chips">
+            <button class="size-chip" data-size="1" title="Ultra Fina (1px)">1</button>
+            <button class="size-chip active" data-size="2.5" title="Padrão (2.5px)">2.5</button>
+            <button class="size-chip" data-size="5" title="Média (5px)">5</button>
+            <button class="size-chip" data-size="12" title="Grossa (12px)">12</button>
+            <button class="size-chip" data-size="24" title="Extra Grossa (24px)">24</button>
+          </div>
         </div>
 
         <div class="divider"></div>
