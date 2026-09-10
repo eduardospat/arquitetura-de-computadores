@@ -40,10 +40,15 @@ const MAX_UNDO_STACK = 100;
 let currentPath = null;
 let drawStartState = null;
 let selectedElement = null;
+let selectedElements = []; // Multi-element selection array
+let isAreaSelecting = false;
+let areaSelectStartPt = null;
+let areaSelectCurrentPt = null;
 let isDraggingElement = false;
 let dragStartState = null;
 let dragStartPt = null;
 let dragOriginalData = null;
+let dragOriginalDataList = [];
 
 let isResizingElement = false;
 let resizeHandle = null;
@@ -637,6 +642,7 @@ function travelHistory(from, to, label) {
     elements = applyBoardChanges(current, changes);
     to.push(changes);
     if (to.length > MAX_UNDO_STACK) to.shift();
+    selectedElements = [];
     selectedElement = null;
     rehydrateImages();
     render();
@@ -667,7 +673,15 @@ function receiveBoardChanges(changes) {
   eraseStartState = rebase(eraseStartState);
   if (isResizingElement && resizeStartState) resizeStartState = rebase(resizeStartState);
   elements = applyBoardChanges(elements, changes);
-  if (selectedElement) selectedElement = elements.find(el => el.id === selectedElement.id) || null;
+  if (selectedElements.length > 0) {
+    selectedElements = selectedElements
+      .map(sel => elements.find(el => el.id === sel.id))
+      .filter(Boolean);
+    selectedElement = selectedElements.length === 1 ? selectedElements[0] : null;
+  } else if (selectedElement) {
+    selectedElement = elements.find(el => el.id === selectedElement.id) || null;
+    selectedElements = selectedElement ? [selectedElement] : [];
+  }
   rehydrateImages();
   render();
 }
@@ -762,8 +776,17 @@ function render() {
   });
 
   // Draw selection outline
-  if (selectedElement) {
+  if (selectedElements.length === 1) {
+    drawSelectionBox(ctx, selectedElements[0]);
+  } else if (selectedElements.length > 1) {
+    drawGroupSelectionBox(ctx, selectedElements);
+  } else if (selectedElement) {
     drawSelectionBox(ctx, selectedElement);
+  }
+
+  // Draw area selection marquee if active
+  if (isAreaSelecting && areaSelectStartPt && areaSelectCurrentPt) {
+    drawAreaSelectionMarquee(ctx, areaSelectStartPt, areaSelectCurrentPt);
   }
 
   // Draw peer cursors
@@ -1225,54 +1248,244 @@ function drawSelectionBox(context, el) {
   context.restore();
 }
 
-function startElementDrag(el, pt) {
-  selectedElement = el;
+function pointInBox(px, py, box) {
+  return px >= box.x && px <= box.x + box.width &&
+         py >= box.y && py <= box.y + box.height;
+}
+
+function lineIntersectsLine(x1, y1, x2, y2, x3, y3, x4, y4) {
+  const denom = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
+  if (denom === 0) return false;
+  const ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denom;
+  const ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denom;
+  return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1;
+}
+
+function lineIntersectsBox(x1, y1, x2, y2, box) {
+  if (pointInBox(x1, y1, box) || pointInBox(x2, y2, box)) return true;
+  const bx2 = box.x + box.width;
+  const by2 = box.y + box.height;
+  return (
+    lineIntersectsLine(x1, y1, x2, y2, box.x, box.y, bx2, box.y) ||
+    lineIntersectsLine(x1, y1, x2, y2, bx2, box.y, bx2, by2) ||
+    lineIntersectsLine(x1, y1, x2, y2, bx2, by2, box.x, by2) ||
+    lineIntersectsLine(x1, y1, x2, y2, box.x, by2, box.x, box.y)
+  );
+}
+
+function boxIntersectsBox(b1, b2) {
+  return !(
+    b1.x + b1.width < b2.x ||
+    b1.x > b2.x + b2.width ||
+    b1.y + b1.height < b2.y ||
+    b1.y > b2.y + b2.height
+  );
+}
+
+function elementIntersectsArea(el, area) {
+  if (!el || !area) return false;
+  const bbox = getElementBoundingBox(el);
+  if (!bbox) return false;
+  if (!boxIntersectsBox(bbox, area)) return false;
+
+  if (el.type === 'image' || el.type === 'rect' || el.type === 'mux' || el.type === 'alu' || el.type === 'text') {
+    return true;
+  }
+
+  if (el.type === 'line' || el.type === 'arrow') {
+    return lineIntersectsBox(el.x1, el.y1, el.x2, el.y2, area);
+  }
+
+  if (el.type === 'path' && el.points) {
+    if (el.points.length === 0) return false;
+    if (el.points.length === 1) {
+      return pointInBox(el.points[0].x, el.points[0].y, area);
+    }
+    for (let i = 0; i < el.points.length; i++) {
+      if (pointInBox(el.points[i].x, el.points[i].y, area)) return true;
+    }
+    for (let i = 0; i < el.points.length - 1; i++) {
+      if (lineIntersectsBox(el.points[i].x, el.points[i].y, el.points[i + 1].x, el.points[i + 1].y, area)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  return false;
+}
+
+function getGroupBoundingBox(items) {
+  if (!items || items.length === 0) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const el of items) {
+    const bbox = getElementBoundingBox(el);
+    if (!bbox) continue;
+    if (bbox.x < minX) minX = bbox.x;
+    if (bbox.y < minY) minY = bbox.y;
+    if (bbox.x + bbox.width > maxX) maxX = bbox.x + bbox.width;
+    if (bbox.y + bbox.height > maxY) maxY = bbox.y + bbox.height;
+  }
+  if (minX === Infinity) return null;
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY
+  };
+}
+
+function drawGroupSelectionBox(context, items) {
+  const bbox = getGroupBoundingBox(items);
+  if (!bbox) return;
+
+  context.save();
+  const pad = Math.max(6, 6 / zoom);
+  const sx = bbox.x - pad;
+  const sy = bbox.y - pad;
+  const sw = bbox.width + pad * 2;
+  const sh = bbox.height + pad * 2;
+
+  context.fillStyle = 'rgba(37, 99, 235, 0.05)';
+  context.fillRect(sx, sy, sw, sh);
+
+  context.strokeStyle = '#2563eb';
+  context.lineWidth = Math.max(1.2, 1.5 / zoom);
+  context.setLineDash([6 / zoom, 4 / zoom]);
+  context.strokeRect(sx, sy, sw, sh);
+
+  context.setLineDash([]);
+  context.fillStyle = '#2563eb';
+  const dotR = Math.max(3, 4 / zoom);
+  [
+    { x: sx, y: sy },
+    { x: sx + sw, y: sy },
+    { x: sx + sw, y: sy + sh },
+    { x: sx, y: sy + sh }
+  ].forEach(d => {
+    context.beginPath();
+    context.arc(d.x, d.y, dotR, 0, Math.PI * 2);
+    context.fill();
+  });
+
+  const badgeText = `${items.length} itens selecionados`;
+  const fontSize = Math.max(9, 11 / zoom);
+  context.font = `600 ${fontSize}px Inter, sans-serif`;
+  const textMetrics = context.measureText(badgeText);
+  const badgeW = textMetrics.width + 14 / zoom;
+  const badgeH = fontSize * 1.7;
+  const badgeX = sx + sw / 2 - badgeW / 2;
+  const badgeY = sy + sh + 6 / zoom;
+
+  context.fillStyle = 'rgba(15, 23, 42, 0.88)';
+  context.beginPath();
+  const r = 4 / zoom;
+  if (context.roundRect) {
+    context.roundRect(badgeX, badgeY, badgeW, badgeH, r);
+  } else {
+    context.rect(badgeX, badgeY, badgeW, badgeH);
+  }
+  context.fill();
+
+  context.fillStyle = '#ffffff';
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(badgeText, sx + sw / 2, badgeY + badgeH / 2);
+
+  context.restore();
+}
+
+function drawAreaSelectionMarquee(context, startPt, currentPt) {
+  const x = Math.min(startPt.x, currentPt.x);
+  const y = Math.min(startPt.y, currentPt.y);
+  const w = Math.abs(currentPt.x - startPt.x);
+  const h = Math.abs(currentPt.y - startPt.y);
+
+  context.save();
+  context.fillStyle = 'rgba(59, 130, 246, 0.12)';
+  context.fillRect(x, y, w, h);
+
+  context.strokeStyle = '#3b82f6';
+  context.lineWidth = Math.max(1, 1.4 / zoom);
+  context.setLineDash([5 / zoom, 3 / zoom]);
+  context.strokeRect(x, y, w, h);
+  context.restore();
+}
+
+function startSelectionDrag(pt) {
+  if (!selectedElements.length) return;
   isDraggingElement = true;
   dragStartPt = { x: pt.x, y: pt.y };
   dragStartState = serializeBoardState();
+  dragOriginalDataList = selectedElements.map(el => {
+    if (el.type === 'path' && el.points) {
+      return {
+        el,
+        type: 'path',
+        points: el.points.map(p => ({ x: p.x, y: p.y }))
+      };
+    } else if (el.type === 'image' || el.type === 'text') {
+      return {
+        el,
+        type: el.type,
+        x: el.x,
+        y: el.y
+      };
+    } else if (el.x1 !== undefined && el.x2 !== undefined) {
+      return {
+        el,
+        type: el.type,
+        x1: el.x1,
+        y1: el.y1,
+        x2: el.x2,
+        y2: el.y2
+      };
+    }
+    return { el, type: el.type };
+  });
 
-  if (el.type === 'path' && el.points) {
-    dragOriginalData = {
-      type: 'path',
-      points: el.points.map(p => ({ x: p.x, y: p.y }))
-    };
-  } else if (el.type === 'image' || el.type === 'text') {
-    dragOriginalData = {
-      type: el.type,
-      x: el.x,
-      y: el.y
-    };
-  } else if (el.x1 !== undefined && el.x2 !== undefined) {
-    dragOriginalData = {
-      type: el.type,
-      x1: el.x1,
-      y1: el.y1,
-      x2: el.x2,
-      y2: el.y2
-    };
+  if (selectedElements.length === 1) {
+    selectedElement = selectedElements[0];
+    dragOriginalData = dragOriginalDataList[0];
+  } else {
+    selectedElement = null;
+    dragOriginalData = null;
   }
 }
 
-function updateElementDrag(pt) {
-  if (!selectedElement || !dragOriginalData || !dragStartPt) return;
+function updateSelectionDrag(pt) {
+  if (!isDraggingElement || !dragStartPt || !dragOriginalDataList.length) return;
   const dx = pt.x - dragStartPt.x;
   const dy = pt.y - dragStartPt.y;
 
-  if (dragOriginalData.type === 'path') {
-    for (let i = 0; i < selectedElement.points.length; i++) {
-      selectedElement.points[i].x = Math.round((dragOriginalData.points[i].x + dx) * 10) / 10;
-      selectedElement.points[i].y = Math.round((dragOriginalData.points[i].y + dy) * 10) / 10;
+  for (const item of dragOriginalDataList) {
+    const el = item.el;
+    if (item.type === 'path') {
+      for (let i = 0; i < el.points.length; i++) {
+        el.points[i].x = Math.round((item.points[i].x + dx) * 10) / 10;
+        el.points[i].y = Math.round((item.points[i].y + dy) * 10) / 10;
+      }
+    } else if (item.type === 'image' || item.type === 'text') {
+      el.x = Math.round((item.x + dx) * 10) / 10;
+      el.y = Math.round((item.y + dy) * 10) / 10;
+    } else if (item.x1 !== undefined) {
+      el.x1 = Math.round((item.x1 + dx) * 10) / 10;
+      el.y1 = Math.round((item.y1 + dy) * 10) / 10;
+      el.x2 = Math.round((item.x2 + dx) * 10) / 10;
+      el.y2 = Math.round((item.y2 + dy) * 10) / 10;
     }
-  } else if (dragOriginalData.type === 'image' || dragOriginalData.type === 'text') {
-    selectedElement.x = Math.round((dragOriginalData.x + dx) * 10) / 10;
-    selectedElement.y = Math.round((dragOriginalData.y + dy) * 10) / 10;
-  } else {
-    selectedElement.x1 = Math.round((dragOriginalData.x1 + dx) * 10) / 10;
-    selectedElement.y1 = Math.round((dragOriginalData.y1 + dy) * 10) / 10;
-    selectedElement.x2 = Math.round((dragOriginalData.x2 + dx) * 10) / 10;
-    selectedElement.y2 = Math.round((dragOriginalData.y2 + dy) * 10) / 10;
   }
   render();
+}
+
+function startElementDrag(el, pt) {
+  selectedElements = [el];
+  selectedElement = el;
+  startSelectionDrag(pt);
+}
+
+function updateElementDrag(pt) {
+  updateSelectionDrag(pt);
 }
 
 function startImageResize(el, handle, pt) {
@@ -1566,6 +1779,7 @@ function loadTemplateToCanvas(url) {
     };
 
     elements.push(el);
+    selectedElements = [el];
     selectedElement = el;
 
     // Center and fit all elements on screen so user sees both previous work and the new diagram!
@@ -1586,6 +1800,7 @@ window.loadTemplateByName = function(fname) {
 
 function setActiveTool(tool) {
   currentTool = tool;
+  selectedElements = [];
   selectedElement = null;
   document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
   const btn = document.querySelector(`.tool-btn[data-tool="${currentTool}"]`);
@@ -1668,6 +1883,7 @@ function setupEventListeners() {
     if (confirm('Tem certeza que deseja limpar todo o quadro?')) {
       recordState();
       elements = [];
+      selectedElements = [];
       selectedElement = null;
       render();
       scheduleAutoSave();
@@ -1763,8 +1979,9 @@ function setupEventListeners() {
 
   // Toggle Palette Collapse
   btnTogglePalette.addEventListener('click', () => {
-    toolPalette.classList.toggle('collapsed');
-    btnTogglePalette.textContent = toolPalette.classList.contains('collapsed') ? '▶' : '◀';
+    const isCollapsed = toolPalette.classList.toggle('collapsed');
+    btnTogglePalette.textContent = isCollapsed ? '▶' : '◀';
+    btnTogglePalette.title = isCollapsed ? 'Mostrar menu de ferramentas (Expandir)' : 'Ocultar menu de ferramentas (Recolher)';
     setTimeout(resizeCanvas, 220);
   });
 
@@ -1944,33 +2161,73 @@ function handlePointerDown(e) {
   startY = pt.y;
 
   if (currentTool === 'select') {
-    // 1. Check if clicking on an image resize handle
-    if (selectedElement && selectedElement.type === 'image') {
-      const handle = hitTestResizeHandle(selectedElement, pt.x, pt.y);
+    // 1. Check if clicking on an image resize handle (only for single selected image)
+    if (selectedElements.length === 1 && selectedElements[0].type === 'image') {
+      const handle = hitTestResizeHandle(selectedElements[0], pt.x, pt.y);
       if (handle) {
-        startImageResize(selectedElement, handle, pt);
+        startImageResize(selectedElements[0], handle, pt);
         render();
         return;
       }
     }
 
-    // 2. Check if clicking inside already selected element
-    if (selectedElement && hitTestElement(selectedElement, pt.x, pt.y)) {
-      startElementDrag(selectedElement, pt);
+    // 2. Check if clicking inside already selected elements or group bounding box to drag
+    let clickedInsideSelection = false;
+    if (selectedElements.length > 0) {
+      for (const el of selectedElements) {
+        if (hitTestElement(el, pt.x, pt.y)) {
+          clickedInsideSelection = true;
+          break;
+        }
+      }
+      if (!clickedInsideSelection && selectedElements.length > 1) {
+        const groupBbox = getGroupBoundingBox(selectedElements);
+        if (groupBbox && pointInBox(pt.x, pt.y, groupBbox)) {
+          clickedInsideSelection = true;
+        }
+      }
+    }
+
+    if (clickedInsideSelection) {
+      startSelectionDrag(pt);
       render();
       return;
     }
 
     // 3. Hit test all elements from top to bottom (highest z-index first)
-    selectedElement = null;
+    let hitEl = null;
     for (let i = elements.length - 1; i >= 0; i--) {
       const el = elements[i];
       if (hitTestElement(el, pt.x, pt.y)) {
-        selectedElement = el;
-        startElementDrag(el, pt);
+        hitEl = el;
         break;
       }
     }
+
+    if (hitEl) {
+      if (e.shiftKey) {
+        if (selectedElements.includes(hitEl)) {
+          selectedElements = selectedElements.filter(el => el !== hitEl);
+        } else {
+          selectedElements.push(hitEl);
+        }
+      } else {
+        selectedElements = [hitEl];
+      }
+      selectedElement = selectedElements.length === 1 ? selectedElements[0] : null;
+      startSelectionDrag(pt);
+      render();
+      return;
+    }
+
+    // 4. Clicked empty canvas: start Area Selection marquee
+    if (!e.shiftKey) {
+      selectedElements = [];
+      selectedElement = null;
+    }
+    isAreaSelecting = true;
+    areaSelectStartPt = { x: pt.x, y: pt.y };
+    areaSelectCurrentPt = { x: pt.x, y: pt.y };
     render();
     return;
   }
@@ -2022,7 +2279,7 @@ function handlePointerDown(e) {
 }
 
 function handlePointerMove(e) {
-  if (isDrawing || isPanning || isDraggingElement || isResizingElement) {
+  if (isDrawing || isPanning || isDraggingElement || isResizingElement || isAreaSelecting) {
     if (e.cancelable) e.preventDefault();
   }
 
@@ -2051,8 +2308,15 @@ function handlePointerMove(e) {
 
   const pt = screenToCanvas(mouseX, mouseY);
 
-  if (isInside || isDrawing || isDraggingElement || isResizingElement) {
+  if (isInside || isDrawing || isDraggingElement || isResizingElement || isAreaSelecting) {
     broadcastCursor(pt.x, pt.y);
+  }
+
+  // Active Area Selection Marquee
+  if (isAreaSelecting) {
+    areaSelectCurrentPt = { x: pt.x, y: pt.y };
+    render();
+    return;
   }
 
   // Active Image Resizing
@@ -2061,39 +2325,47 @@ function handlePointerMove(e) {
     return;
   }
 
-  // Active Element Dragging (Moving)
-  if (isDraggingElement && selectedElement) {
-    updateElementDrag(pt);
+  // Active Element(s) Dragging (Moving)
+  if (isDraggingElement && selectedElements.length > 0) {
+    updateSelectionDrag(pt);
     return;
   }
 
   // Hover cursor management for selection tool
-  if (currentTool === 'select' && !isDrawing && !isDraggingElement && !isResizingElement && !spacePressed) {
-    if (selectedElement && selectedElement.type === 'image') {
-      const handle = hitTestResizeHandle(selectedElement, pt.x, pt.y);
+  if (currentTool === 'select' && !isDrawing && !isDraggingElement && !isResizingElement && !isAreaSelecting && !spacePressed) {
+    if (selectedElements.length === 1 && selectedElements[0].type === 'image') {
+      const handle = hitTestResizeHandle(selectedElements[0], pt.x, pt.y);
       if (handle) {
         canvas.style.cursor = handle.cursor;
-      } else if (hitTestElement(selectedElement, pt.x, pt.y)) {
+      } else if (hitTestElement(selectedElements[0], pt.x, pt.y)) {
         canvas.style.cursor = 'move';
       } else {
-        let overOther = false;
-        for (let i = elements.length - 1; i >= 0; i--) {
-          if (hitTestElement(elements[i], pt.x, pt.y)) {
-            overOther = true;
-            break;
-          }
-        }
-        canvas.style.cursor = overOther ? 'pointer' : 'default';
+        const overAny = elements.some(el => hitTestElement(el, pt.x, pt.y));
+        canvas.style.cursor = overAny ? 'pointer' : 'crosshair';
       }
-    } else {
-      let overAny = false;
-      for (let i = elements.length - 1; i >= 0; i--) {
-        if (hitTestElement(elements[i], pt.x, pt.y)) {
-          overAny = true;
+    } else if (selectedElements.length > 0) {
+      let overSelection = false;
+      for (const el of selectedElements) {
+        if (hitTestElement(el, pt.x, pt.y)) {
+          overSelection = true;
           break;
         }
       }
-      canvas.style.cursor = overAny ? (selectedElement ? 'move' : 'pointer') : 'default';
+      if (!overSelection && selectedElements.length > 1) {
+        const groupBbox = getGroupBoundingBox(selectedElements);
+        if (groupBbox && pointInBox(pt.x, pt.y, groupBbox)) {
+          overSelection = true;
+        }
+      }
+      if (overSelection) {
+        canvas.style.cursor = 'move';
+      } else {
+        const overAny = elements.some(el => hitTestElement(el, pt.x, pt.y));
+        canvas.style.cursor = overAny ? 'pointer' : 'crosshair';
+      }
+    } else {
+      const overAny = elements.some(el => hitTestElement(el, pt.x, pt.y));
+      canvas.style.cursor = overAny ? 'pointer' : 'crosshair';
     }
   } else if (currentTool !== 'eraser' && !spacePressed) {
     canvas.style.cursor = '';
@@ -2164,6 +2436,38 @@ function handlePointerUp(e) {
     }
   }
 
+  if (isAreaSelecting) {
+    isAreaSelecting = false;
+    if (areaSelectStartPt && areaSelectCurrentPt) {
+      const x = Math.min(areaSelectStartPt.x, areaSelectCurrentPt.x);
+      const y = Math.min(areaSelectStartPt.y, areaSelectCurrentPt.y);
+      const w = Math.abs(areaSelectCurrentPt.x - areaSelectStartPt.x);
+      const h = Math.abs(areaSelectCurrentPt.y - areaSelectStartPt.y);
+
+      if (w > 3 || h > 3) {
+        const areaBox = { x, y, width: w, height: h };
+        const matched = elements.filter(el => elementIntersectsArea(el, areaBox));
+        if (e && e.shiftKey) {
+          const currentSet = new Set(selectedElements);
+          for (const m of matched) {
+            if (!currentSet.has(m)) {
+              selectedElements.push(m);
+            }
+          }
+        } else {
+          selectedElements = matched;
+        }
+        selectedElement = selectedElements.length === 1 ? selectedElements[0] : null;
+        if (selectedElements.length > 1) {
+          showToast(`📦 ${selectedElements.length} itens selecionados`);
+        }
+      }
+    }
+    areaSelectStartPt = null;
+    areaSelectCurrentPt = null;
+    render();
+  }
+
   if (isResizingElement) {
     isResizingElement = false;
     resizeHandle = null;
@@ -2183,7 +2487,7 @@ function handlePointerUp(e) {
 
   if (isDraggingElement) {
     isDraggingElement = false;
-    if (selectedElement && dragStartPt && dragStartState) {
+    if (dragStartPt && dragStartState && selectedElements.length > 0) {
       const dist = Math.hypot(pt.x - dragStartPt.x, pt.y - dragStartPt.y);
       if (dist > 1.5) {
         pushUndoState(dragStartState);
@@ -2194,6 +2498,7 @@ function handlePointerUp(e) {
     dragStartState = null;
     dragStartPt = null;
     dragOriginalData = null;
+    dragOriginalDataList = [];
   }
 
   if (currentTool === 'eraser') {
@@ -2572,7 +2877,10 @@ function eraseCircleStep(cx, cy, radius) {
 
   if (changed) {
     elements = newElements;
-    if (selectedElement && !elements.includes(selectedElement)) {
+    if (selectedElements.length > 0) {
+      selectedElements = selectedElements.filter(el => elements.includes(el));
+      selectedElement = selectedElements.length === 1 ? selectedElements[0] : null;
+    } else if (selectedElement && !elements.includes(selectedElement)) {
       selectedElement = null;
     }
   }
@@ -2735,6 +3043,7 @@ function addImageFromFile(file, posX, posY) {
       };
       elements.push(el);
       setActiveTool('select');
+      selectedElements = [el];
       selectedElement = el;
       render();
       scheduleAutoSave();
@@ -3065,6 +3374,11 @@ function setupHotkeys() {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
     if (e.key === 'Escape') {
+      if (selectedElements.length > 0 || selectedElement) {
+        selectedElements = [];
+        selectedElement = null;
+        render();
+      }
       closeGalleryModal();
       closeShortcutsModal();
       studySidebar.classList.add('closed');
@@ -3103,7 +3417,19 @@ function setupHotkeys() {
     }
 
     if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (selectedElement) {
+      if (selectedElements.length > 0) {
+        recordState();
+        const count = selectedElements.length;
+        const set = new Set(selectedElements);
+        elements = elements.filter(el => !set.has(el));
+        selectedElements = [];
+        selectedElement = null;
+        render();
+        scheduleAutoSave();
+        commitLocalAction();
+        showToast(count === 1 ? '🗑️ Elemento excluído (Ctrl+Z para desfazer)' : `🗑️ ${count} elementos excluídos (Ctrl+Z para desfazer)`);
+        return;
+      } else if (selectedElement) {
         recordState();
         elements = elements.filter(el => el !== selectedElement);
         selectedElement = null;
@@ -3325,6 +3651,7 @@ function handleWsMessage(msg) {
       peerLiveStrokes.delete(msg.clientId);
       if (Array.isArray(msg.elements)) {
         receiveBoardChanges(boardChanges(JSON.parse(serializeBoardState()), msg.elements));
+        selectedElements = [];
         selectedElement = null;
         rehydrateImages();
         render();
@@ -3336,6 +3663,7 @@ function handleWsMessage(msg) {
       if (msg.clientId === wsClientId) return;
       peerLiveStrokes.clear();
       receiveBoardChanges(boardChanges(JSON.parse(serializeBoardState()), []));
+      selectedElements = [];
       selectedElement = null;
       render();
       showToast('🧹 O quadro foi limpo por outro participante.');

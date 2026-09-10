@@ -226,15 +226,15 @@ select:focus {
 /* ==================== Docked Left Tool Palette ==================== */
 /* Docked on the left as a flex column: NEVER covers the canvas! */
 .tool-palette {
-  flex: 0 0 84px;
-  width: 84px;
+  flex: 0 0 106px;
+  width: 106px;
   position: relative;
   background-color: var(--bg-secondary);
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 8px 4px;
+  padding: 8px 6px;
   gap: 6px;
   z-index: 10;
   overflow-y: auto;
@@ -256,37 +256,53 @@ select:focus {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 0 4px 4px 4px;
+  padding: 2px 2px 6px 2px;
   border-bottom: 1px solid rgba(51, 65, 85, 0.6);
+  gap: 4px;
 }
 
 .palette-title {
   font-size: 8px;
-  font-weight: 700;
+  font-weight: 800;
   color: var(--text-muted);
-  letter-spacing: 0.5px;
+  letter-spacing: 0.8px;
+  white-space: nowrap;
 }
 
 .btn-toggle-palette {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(37, 99, 235, 0.2);
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  color: #93c5fd;
+  font-size: 11px;
+  font-weight: 700;
   cursor: pointer;
-  padding: 2px;
-  border-radius: 3px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  line-height: 1;
 }
 
 .btn-toggle-palette:hover {
-  color: #fff;
-  background-color: var(--bg-tertiary);
+  color: #ffffff;
+  background-color: var(--accent);
+  border-color: #60a5fa;
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.5);
+  transform: scale(1.05);
+}
+
+.btn-toggle-palette:active {
+  transform: scale(0.95);
 }
 
 /* Collapsed Palette */
 .tool-palette.collapsed {
-  flex: 0 0 42px;
-  width: 42px;
-  padding: 8px 2px;
+  flex: 0 0 46px;
+  width: 46px;
+  padding: 8px 4px;
 }
 
 .tool-palette.collapsed .tool-name,
@@ -295,13 +311,36 @@ select:focus {
   display: none;
 }
 
+.tool-palette.collapsed .palette-header {
+  justify-content: center;
+  padding: 2px 0 6px 0;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.6);
+}
+
+.tool-palette.collapsed .btn-toggle-palette {
+  width: 36px;
+  height: 30px;
+  background: var(--accent);
+  border-color: #60a5fa;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 900;
+  box-shadow: 0 2px 10px rgba(37, 99, 235, 0.55);
+}
+
+.tool-palette.collapsed .btn-toggle-palette:hover {
+  background: #1d4ed8;
+  box-shadow: 0 0 14px rgba(59, 130, 246, 0.8);
+  transform: scale(1.08);
+}
+
 .tool-palette.collapsed .tool-group {
-  grid-template-columns: 34px;
+  grid-template-columns: 36px;
 }
 
 .tool-palette.collapsed .tool-btn {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
 }
 
 .tool-palette.collapsed .palette-colors {
@@ -315,21 +354,21 @@ select:focus {
 
 .tool-group {
   display: grid;
-  grid-template-columns: repeat(2, 34px);
-  gap: 4px;
+  grid-template-columns: repeat(2, 44px);
+  gap: 6px;
   justify-content: center;
 }
 
 .tool-btn {
-  width: 34px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 7px;
   color: #cbd5e1;
   cursor: pointer;
   transition: all 0.12s ease;
@@ -337,17 +376,17 @@ select:focus {
 }
 
 .tool-btn svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   fill: currentColor;
 }
 
 .tool-btn .tool-name {
-  font-size: 7.5px;
+  font-size: 8px;
   font-weight: 600;
-  margin-top: 2px;
+  margin-top: 3px;
   text-transform: uppercase;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.3px;
   white-space: nowrap;
 }
 
@@ -377,7 +416,7 @@ select:focus {
 /* Colors & Sizes */
 .palette-colors {
   display: grid;
-  grid-template-columns: repeat(3, 18px);
+  grid-template-columns: repeat(4, 18px);
   gap: 5px;
   padding: 2px;
   justify-content: center;
@@ -496,7 +535,7 @@ select:focus {
 
 .stroke-quick-chips {
   display: flex;
-  gap: 2px;
+  gap: 3px;
   width: 100%;
   justify-content: space-between;
 }
@@ -505,10 +544,10 @@ select:focus {
   background: rgba(15, 23, 42, 0.6);
   border: 1px solid var(--border-color);
   color: #94a3b8;
-  font-size: 8px;
+  font-size: 8.5px;
   font-weight: 600;
-  border-radius: 3px;
-  padding: 2px 2px;
+  border-radius: 4px;
+  padding: 3px 1px;
   cursor: pointer;
   flex: 1;
   text-align: center;
